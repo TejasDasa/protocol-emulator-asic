@@ -62,15 +62,37 @@ Measured, `python3 mutate.py`:
 |---|---|
 | uart_tx | 30/31 (96.8%) |
 | uart_rx | 32/37 (86.5%) |
-| spi | 46/54 (85.2%) |
-| i2c | 100/127 (78.7%) |
+| spi | 47/54 (87.0%) |
+| i2c | 108/127 (85.0%) |
 | usb | 95/101 (94.1%) |
-| **total** | **303/350 (86.6%)** |
+| **total** | **312/350 (89.1%)** |
 
-Row-order swaps are reported separately (4/54 killed) and excluded from that rate: targets
-resolve by name, so most adjacent swaps are equivalent mutants.
+Row-order swaps are reported separately (4/54 killed) and **excluded from that rate**, which is
+a deliberate choice worth stating: branch targets resolve by NAME, so exchanging two adjacent
+rows changes behaviour only for rows that fall through to `next`. Most rows carry explicit
+targets, so most swap mutants are semantically identical programs -- textbook equivalent
+mutants. Counting them would understate detection; the four that do die identify the rows that
+genuinely depend on physical order.
 
-**Known validation gap.** 14 survivors are the same mutation, `test tmr -> always`, all in SPI
+`python3 mutate.py --gate` is a validity gate wired into `make check`. It fails if the kill rate
+drops below a floor OR if the mutant count drops, the latter catching a benchmark being removed
+(which would raise the percentage while testing less).
+
+**Timing is now checked.** SPI and I2C device models take `sck_nominal` / `scl_high_nominal` /
+`scl_low_nominal` and a tolerance, and assert each clock phase lasts at least
+`nominal * (1 - tol)`. These are MINIMUMS, matching how both protocols specify clock timing
+(`t_HIGH` and `t_LOW` are minimums), which also makes them correct under I2C clock stretching --
+a target can only lengthen the low phase. `tol` (default 0.25) is deliberate slack for
+propagation delay and jitter, not measurement noise: tighten it to test timing margin. Adding
+these checks took the timer-mutant survivors from 14 to 6 and the overall score from 86.6% to
+89.1%. **All five benchmarks still pass**, so the SPI and I2C programs were timing-correct all
+along -- they simply had never been verified.
+
+**Remaining gap, named.** The 6 surviving timer mutants (spi `END`; i2c `S1`, `A3`, `A5`, `N1`,
+`P3`) do change pin timing -- long phases shorten from 18/20 cycles to 12/13 -- but never below
+the bit-period minimum. Those rows govern I2C's START/STOP setup and hold intervals, which the
+spec times as separate parameters (`t_SU;STA`, `t_HD;STA`, `t_SU;STO`) from `t_HIGH`/`t_LOW`.
+Closing it needs distinct nominals for those rows; it is not closed today.
 and I2C: deleting the timer wait does not fail those benchmarks. uart_tx, uart_rx and usb kill
 100% of test mutants (5/5, 8/8, 16/16) because they check jitter; SPI and I2C check data only.
 So "SPI passes" is a weaker statement than "UART TX passes", and bit timing is unverified for

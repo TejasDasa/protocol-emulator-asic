@@ -90,12 +90,12 @@
   ]
  },
  "spi": {
-  "killed": 46,
+  "killed": 47,
   "total": 54,
-  "pct": 85.18518518518519,
+  "pct": 87.03703703703704,
   "by_class": {
    "test": {
-    "killed": 3,
+    "killed": 4,
     "total": 8
    },
    "target": {
@@ -132,7 +132,6 @@
    "act_drop: row IDLE: drop action trst",
    "test: row IDLE2: test always -> c2z",
    "target: row IDLE2: target RISE -> FALL",
-   "test: row FALL: test tmr -> always",
    "test: row FALL2: test always -> c2z",
    "target: row MORE: target RISE -> FALL",
    "test: row END: test tmr -> always",
@@ -145,12 +144,12 @@
   ]
  },
  "i2c": {
-  "killed": 100,
+  "killed": 108,
   "total": 127,
-  "pct": 78.74015748031496,
+  "pct": 85.03937007874016,
   "by_class": {
    "test": {
-    "killed": 6,
+    "killed": 13,
     "total": 22
    },
    "target": {
@@ -162,7 +161,7 @@
     "total": 22
    },
    "act_drop": {
-    "killed": 10,
+    "killed": 11,
     "total": 15
    },
    "act_add": {
@@ -186,12 +185,6 @@
    "test: row IDLE: test fifo -> in0h",
    "act_drop: row IDLE: drop action trst",
    "test: row S1: test tmr -> always",
-   "test: row B0: test tmr -> always",
-   "test: row B1: test tmr -> always",
-   "act_drop: row B2: drop action trst",
-   "test: row B3: test tmr -> always",
-   "test: row A0: test tmr -> always",
-   "test: row A1: test tmr -> always",
    "target: row A2: target A3 -> A4",
    "act_drop: row A2: drop action trst",
    "test: row A3: test tmr -> always",
@@ -202,8 +195,6 @@
    "act_add: row N2: add action loadk",
    "test: row N3: test always -> c2z",
    "act_drop: row N3: drop action clr",
-   "test: row P0: test tmr -> always",
-   "test: row P1: test tmr -> always",
    "target: row P1: target P2 -> P3",
    "test: row P2: test in1h -> in1l",
    "mode: row P2: swap true/false exits",
@@ -294,9 +285,9 @@
   ]
  },
  "_total": {
-  "killed": 303,
+  "killed": 312,
   "total": 350,
-  "pct": 86.57142857142857,
-  "survivors": 97
+  "pct": 89.14285714285714,
+  "survivors": 88
  }
 }

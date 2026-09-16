@@ -90,8 +90,20 @@ class UartDriver:
 class SpiTarget:
     """Mode 0 SPI target. Records each transaction's bytes and replies from a list."""
 
-    def __init__(self, cs, sck, mosi, miso, replies):
+    def __init__(self, cs, sck, mosi, miso, replies,
+                 sck_nominal=None, tol=0.25):
+        """sck_nominal: expected SCK half-period in cycles. When given, every
+        SCK phase while CS is low must last at least sck_nominal*(1-tol).
+
+        This is a MINIMUM, not an equality, which is how SPI and I2C specify
+        clock timing (t_HIGH / t_LOW are minimums) and what makes the check
+        survive propagation delay and clock jitter. `tol` is deliberate slack,
+        not measurement noise: tighten it to test timing margin, loosen it to
+        allow a sloppier master. A program that ignores its timer collapses the
+        phase to one or two cycles and fails at any sane tolerance."""
         self.cs, self.sck, self.mosi, self.miso = cs, sck, mosi, miso
+        self.sck_min = None if sck_nominal is None else sck_nominal * (1.0 - tol)
+        self.last_edge_t = None
         self.replies = list(replies)
         self.transactions = []
         self.prev = None
@@ -108,6 +120,16 @@ class SpiTarget:
             self.prev = (cs, sck, mosi)
             return
         pcs, psck, pmosi = self.prev
+
+        if psck != sck:                     # SCK edge: check the phase just ended
+            if (self.sck_min is not None and self.active
+                    and self.last_edge_t is not None):
+                dur = w.t - self.last_edge_t
+                if dur < self.sck_min:
+                    w.error(f"spi: SCK phase {dur} cycles < minimum "
+                            f"{self.sck_min:.1f} (master ignored its bit timer?)")
+            self.last_edge_t = w.t
+
         if pcs == 1 and cs == 0:
             if sck != 0:
                 w.error("spi: CS fell with SCK high")
@@ -149,8 +171,24 @@ class I2cTarget:
     """7-bit I2C target at `addr`. ACKs its address and every data byte except 0xFF.
     Randomly stretches the clock after falling edges."""
 
-    def __init__(self, sda, scl, addr, stretch_max=6, seed=1):
+    def __init__(self, sda, scl, addr, stretch_max=6, seed=1,
+                 scl_high_nominal=None, scl_low_nominal=None, tol=0.25):
+        """scl_high_nominal / scl_low_nominal: expected SCL phase lengths in
+        cycles. Each observed phase must last at least nominal*(1-tol).
+
+        Minimums, matching how I2C specifies clock timing (t_HIGH and t_LOW are
+        both minimums in the spec), which also makes the check correct under
+        clock stretching: the target can only ever LENGTHEN the low phase, never
+        shorten it, so a minimum never produces a false failure. The high phase
+        is master-controlled and not stretchable.
+
+        `tol` is deliberate slack for propagation delay and jitter, not
+        measurement noise. A master that ignores its bit timer collapses both
+        phases to one or two cycles and fails at any sane tolerance."""
         self.sda, self.scl, self.addr = sda, scl, addr
+        self.scl_hi_min = None if scl_high_nominal is None else scl_high_nominal * (1.0 - tol)
+        self.scl_lo_min = None if scl_low_nominal is None else scl_low_nominal * (1.0 - tol)
+        self.last_scl_edge_t = None
         self.rng = random.Random(seed)
         self.stretch_max = stretch_max
         self.transactions = []      # (addr_byte, [data], acked_flags)
@@ -161,6 +199,16 @@ class I2cTarget:
     def step(self, w):
         sda, scl = w.value(self.sda), w.value(self.scl)
         psda, pscl = self.prev
+
+        if pscl != scl:                     # SCL edge: check the phase just ended
+            lim = self.scl_hi_min if pscl == 1 else self.scl_lo_min
+            if lim is not None and self.last_scl_edge_t is not None:
+                dur = w.t - self.last_scl_edge_t
+                if dur < lim:
+                    w.error(f"i2c: SCL {'high' if pscl == 1 else 'low'} phase "
+                            f"{dur} cycles < minimum {lim:.1f} "
+                            f"(master ignored its bit timer?)")
+            self.last_scl_edge_t = w.t
 
         if self.hold > 0:
             self.hold -= 1

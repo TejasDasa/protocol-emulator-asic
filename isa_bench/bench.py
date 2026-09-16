@@ -6,6 +6,15 @@ from devices import (UartMonitor, UartDriver, SpiTarget, I2cTarget, UsbLsMonitor
 from programs import BUILDERS
 
 
+# Timing tolerances. These are deliberate slack on a MINIMUM phase length, not
+# measurement noise: real devices have propagation delay and real clocks have
+# jitter, so a check demanding exact periods would pass in simulation and say
+# nothing about silicon. Tighten to test timing margin; loosen to allow a
+# sloppier master. See devices.SpiTarget / devices.I2cTarget.
+SPI_TOL = 0.25
+I2C_TOL = 0.25
+
+
 class Result:
     def __init__(self, ok, detail="", jitter=0, bit_time=None):
         self.ok, self.detail, self.jitter, self.bit_time = ok, detail, jitter, bit_time
@@ -57,7 +66,10 @@ def run_spi(isa, P):
     t1, t2 = [0xA5, 0x3C, 0xFF], [0x00, 0x81]
     replies = [0x11, 0x22, 0x33, 0x44, 0x55]
     w = World([("cs", 1), ("sck", 0), ("mosi", 0), ("miso", 1)])
-    tgt = SpiTarget("cs", "sck", "mosi", "miso", replies)
+    # SCK nominal half-period is P/2 (measured baseline: exactly P/2 for 78 of
+    # 79 phases; the odd one is the inter-transaction gap, which is longer).
+    tgt = SpiTarget("cs", "sck", "mosi", "miso", replies,
+                    sck_nominal=P / 2, tol=SPI_TOL)
     host = Host([
         (always, lambda w: w.tx_fifo.extend(t1)),
         (lambda w: len(tgt.transactions) == 1, lambda w: w.tx_fifo.extend(t2)),
@@ -78,7 +90,10 @@ def run_i2c(isa, P, stretch=None):
     core, prog = BUILDERS[isa]["i2c"](P)
     w = World([("sda", 1), ("scl", 1)])
     stretch = 2 * P if stretch is None else stretch   # longer than a whole bit
-    tgt = I2cTarget("sda", "scl", 0x42, stretch_max=stretch)
+    # Measured baseline: SCL high settles at P/4+2, low at P/2 before any
+    # stretching. Nominals are set below those so the check is a real minimum.
+    tgt = I2cTarget("sda", "scl", 0x42, stretch_max=stretch,
+                    scl_high_nominal=P / 4, scl_low_nominal=P / 2, tol=I2C_TOL)
     txns = [[0x84, 0x5A], [0x84, 0xFF], [0x20, 0x33]]
     host = Host([
         (always, lambda w: w.tx_fifo.extend(txns[0])),

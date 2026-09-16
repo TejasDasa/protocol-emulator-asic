@@ -140,6 +140,12 @@ area: area-core area-imem area-extras area-timer area-fifo area-roww area-chip a
 check:
 	@python3 scripts/check_area.py $(BUILD)/*.log
 	@python3 scripts/check_slope.py $(BUILD)
+	@$(MAKE) --no-print-directory check-mutation
+
+# Mutation score is a validity gate, not a report: if it falls, the benchmarks
+# got weaker. That is how the SPI/I2C timing gap survived unnoticed.
+check-mutation:
+	@cd isa_bench && python3 mutate.py --gate
 
 clean:
 	rm -rf $(BUILD)

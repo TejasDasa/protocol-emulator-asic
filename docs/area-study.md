@@ -17,7 +17,7 @@ cannot be built. That is the open question in §9.
 
 ## Corrections (read this if you saw an earlier version)
 
-Two numbers in earlier revisions of this document were wrong. Both were
+Three claims in earlier revisions were wrong. The two numeric ones were
 **wrong pairings of two correct measurements**, not wrong measurements — the
 underlying `stat` areas, LEF footprints and flop counts are unaffected.
 
@@ -25,6 +25,18 @@ underlying `stat` areas, LEF footprints and flop counts are unaffected.
 |---|---|---|
 | tiling CFGMEM saves ~36,400 µm²/SM (39% of the imem) | **10,318 µm² (18.3%)** cell-basis, **31,359 µm² (33.4%)** placed-basis | §5.4, §9 |
 | moving the imem to DFFRAM takes **6 SMs → about 11** | **6 SMs → 8** | §8, §9 |
+| "8 injected-bug tests, all caught" | **never existed** — see below | `isa_bench/README.md` |
+
+**The eight-injected-bugs claim.** There was no such suite, and no number of bugs appears
+anywhere in the repository. The nearest real claim was a single unimplemented parenthetical in
+`isa_bench/README.md` — "a deliberately corrupted decode is caught" — describing a property
+nothing tested. It has now been made true by `isa_bench/mutate.py`.
+
+This one is worth calling out separately because **it propagated beyond these documents**: the
+claim was repeated in conversation summaries and so fed into planning and advice, not just the
+written study. A prose assertion with no code behind it travelled further than any of the
+measured numbers did. Treat unbacked prose in the older documents as unverified until checked;
+git records no deletions, but git was initialised late, so it cannot vouch for anything earlier.
 
 **What went wrong.** The CFGMEM saving compared the *entire* `stt_imem` module
 against *bare macros*. A CFGMEM macro supplies the storage bits and its own read

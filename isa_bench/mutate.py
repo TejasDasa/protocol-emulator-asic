@@ -129,6 +129,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--bench", default=None)
+    ap.add_argument("--gate", action="store_true",
+                    help="exit non-zero if the score regresses (validity gate)")
+    ap.add_argument("--min-score", type=float, default=85.0,
+                    help="floor for the semantic kill rate, percent")
+    ap.add_argument("--min-mutants", type=int, default=340,
+                    help="floor for the semantic mutant COUNT: catches a "
+                         "benchmark being dropped, which would raise the "
+                         "percentage while testing less")
     args = ap.parse_args()
 
     benches = [args.bench] if args.bench else BENCH
@@ -182,6 +190,23 @@ def main():
 
     out["_total"] = dict(killed=grand_k, total=grand_n, pct=pct,
                          survivors=len(all_survivors))
+
+    if args.gate:
+        bad = []
+        if pct < args.min_score:
+            bad.append(f"semantic kill rate {pct:.1f}% < floor {args.min_score}%")
+        if grand_n < args.min_mutants:
+            bad.append(f"only {grand_n} semantic mutants < floor {args.min_mutants} "
+                       f"(a benchmark may have been dropped)")
+        if bad:
+            print("\nFAIL (validity gate):")
+            for m in bad:
+                print("  " + m)
+            print("A falling mutation score means the benchmarks got weaker, "
+                  "which is exactly how the SPI/I2C timing gap went unnoticed.")
+            return 1
+        print(f"\nOK: mutation gate passed "
+              f"({pct:.1f}% >= {args.min_score}%, {grand_n} >= {args.min_mutants} mutants)")
     if args.json:
         json.dump(out, open("mutation_results.json", "w"), indent=1)
         print("\nwrote mutation_results.json")
