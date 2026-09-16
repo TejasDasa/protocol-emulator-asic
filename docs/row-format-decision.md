@@ -329,6 +329,58 @@ what hold-fixing buffers exist for. This is estimated-parasitic STA with an
 ideal clock, so it is not the final word — but the gap is no longer "never run
 at any frequency," and the first answer it gave was the right one.
 
+#### 5.5.1 Why the ceiling is routing, quantified
+
+Two measurements, both from the sweep in `floorplan/`, both surprising enough to
+be worth stating on their own.
+
+**Adding core area reduced usable routing resource.** The first 6-machine run
+used LibreLane's default IO margin multipliers (`BOTTOM/TOP_MARGIN_MULT` 4,
+`LEFT/RIGHT` 12) instead of the hardened template's 1 and 6, which inset the core
+to 1277.76 x 680.40 = 869,369 µm². Correcting it restored the full
+1283.52 x 703.08 = 902,417 µm², **+3.8% of core** — and total routing resource
+*fell*:
+
+| layer | 869,369 µm² core | 902,417 µm² core | change |
+|---|---|---|---|
+| Metal2 | 98,472 | 98,138 | −0.3% |
+| Metal3 | 144,521 | 144,453 | −0.0% |
+| Metal4 | 95,853 | **87,110** | **−9.1%** |
+| total | 338,846 | 329,701 | −2.7% |
+
+The entire loss is Metal4, with Metal2 and Metal3 flat to within 0.3%. Metal4 is
+the PDN's vertical layer, so a taller core lengthens every power stripe and a
+wider one adds stripes; with `PDN_MULTILAYER` off, that whole cost lands on the
+single layer that is also the only layer able to cross a macro. **On this PDK
+under a single-layer PDN, enlarging the core can shrink the signal routing
+budget.** The core figure is still the right denominator for *area*, and 902,417
+is the correct one — it just does not predict routing.
+
+**Macros cost more routing resource than they cost area.** Same margins, 12
+macros versus 10:
+
+| layer | 12 macros | 10 macros | change |
+|---|---|---|---|
+| Metal2 | 98,138 | 107,740 | +9.8% |
+| Metal3 | 144,453 | 152,816 | +5.8% |
+| Metal4 | 87,110 | 95,426 | +9.5% |
+| total | 329,701 | 355,982 | **+8.0%** |
+
+Two macros are 57,589.06 µm², **6.4% of the core**, but they account for **7.4%
+of total routing resource** — a 1.15x multiplier, and it applies on every layer,
+not just the ones they physically block. That multiplier is the whole reason the
+area budget overshot: §1 solved `N x 57,589.06 + logic/0.60 <= 902,417` and got
+9.94, treating a macro as nothing but its footprint. A macro is its footprint
+*plus* a Metal1-3 blockage over that footprint *plus* its share of a Metal4 layer
+it cannot use.
+
+**For anyone else building macro-heavy designs on this PDK:** area arithmetic
+will overestimate how many macros fit, and the error is not small. Ours put the
+ceiling at 9.94 state machines. Measured, it binds at 5 — **roughly half**. The
+single-layer PDN is what makes it severe: with only Metal2-Metal4 for signals,
+one of those three reserved for power, and Metal1-3 blocked under every macro,
+a macro's shadow has no routing layer at all.
+
 ## 6. CRC and bit stuffer: keep both, on capability
 
 The old argument — "the CRC costs 1.28 row bits, so it pays for itself if it

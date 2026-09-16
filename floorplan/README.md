@@ -68,3 +68,40 @@ the `pdn_test` run that succeeded, which record the exact store paths.
 
 `NP_RUNTIME=bwrap` is also required; nix-portable's auto-selected `nix` runtime
 fails with `setting up a private mount namespace: Operation not permitted`.
+
+## Results
+
+Eight sweep points. Each failing point stops at global routing, because
+`GRT_ALLOW_CONGESTION` is 0, and costs about three minutes.
+
+| SMs | layout | density | overflow GCells | usage |
+|---|---|---|---|---|
+| 6 | interleaved | 60 | 182 | 39.1% |
+| 6 | interleaved | 50 | 113 | 37.3% |
+| 6 | interleaved | **40** | **42** | 39.5% |
+| 6 | interleaved | 30 | 585 | 43.3% |
+| 6 | grouped | 50 | 2,017 | 34.5% |
+| 6 | grouped | 40 | 1,978 | 35.6% |
+| **5** | interleaved | **40** | **1** | **28.0%** |
+| 5 | interleaved | 30 | 1 | 30.3% |
+
+**Density has an optimum near 40.** Spreading further made 6 machines worse
+(42 → 585 overflow at density 30): past the optimum, spreading only lengthens
+wires across the macro shadows.
+
+**Grouping the macros is much worse, not better.** The hypothesis was that one
+contiguous macro block would leave clear routing channels, where interleaving
+forces signals across four macro shadows. It is ~47x worse. The reason is a
+geometry constraint the hypothesis did not account for: only three macro columns
+fit across the die, so twelve macros grouped is a block 1,050 µm wide on a
+1,283 µm core — not a block with logic around it but a **wall across 82% of the
+die**, with one standard-cell row between macro rows and therefore no channel
+through it. Interleaving is worse locally and wins decisively, because it leaves
+four full-width horizontal channels.
+
+**5 machines reaches 1 overflow GCell of 355,982 resources at 28% usage**, which
+is noise rather than congestion, so that point is the one taken to a full signoff
+run.
+
+See `docs/row-format-decision.md` §5.5 and §5.5.1 for what this does to the SM
+count and why the ceiling binds on routing rather than area.

@@ -50,6 +50,13 @@ DENSITY = int(sys.argv[2]) if len(sys.argv) > 2 else 60
 HHALO   = float(sys.argv[3]) if len(sys.argv) > 3 else 2.0
 VHALO   = float(sys.argv[4]) if len(sys.argv) > 4 else 0.48
 LAYOUT  = sys.argv[5] if len(sys.argv) > 5 else "interleaved"
+# The sweep runs with congestion disallowed so a bad point fails in 3 minutes
+# instead of grinding through detailed routing. The FINAL run of a chosen point
+# sets this, because a global-routing overflow of 1 GCell out of 355,982 at 28%
+# usage is noise that detailed routing resolves -- and route__drc_errors after
+# detailed routing, not GRT overflow, is the gate that decides submittability.
+ALLOW   = int(sys.argv[6]) if len(sys.argv) > 6 else 0
+SIGNOFF = int(sys.argv[7]) if len(sys.argv) > 7 else 0
 assert LAYOUT in ("interleaved", "grouped"), LAYOUT
 
 # ---------------------------------------------------------------- the top
@@ -177,10 +184,10 @@ cfg = {
     "FP_MACRO_VERTICAL_HALO": VHALO,
     "PL_TARGET_DENSITY_PCT": DENSITY,
     # Congestion is one of the things this run is for, so do NOT allow it.
-    "GRT_ALLOW_CONGESTION": 0,
+    "GRT_ALLOW_CONGESTION": ALLOW,
     "RUN_KLAYOUT_XOR": 0,
-    "RUN_KLAYOUT_DRC": 0,
-    "RUN_MAGIC_DRC": 0,
+    "RUN_KLAYOUT_DRC": SIGNOFF,
+    "RUN_MAGIC_DRC": SIGNOFF,
     "RUN_LINTER": 0,
     "meta": {"flow": "Classic",
              "substituting_steps": {
@@ -199,6 +206,7 @@ macro_area = len(instances) * MACRO_W * MACRO_H
 core_area = CORE_W * CORE_H
 print(f"NSM={NSM}  macros={len(instances)}  layout={LAYOUT}  density={DENSITY}%  "
       f"halo={HHALO}/{VHALO}")
+print(f"  allow_congestion={ALLOW}  signoff_drc={SIGNOFF}")
 print(f"  top regenerated from ../rtl/stt_chip.v ({lines} lines)")
 print(f"  core: {CORE_W} x {CORE_H} = {core_area:.0f} um2 "
       f"(margins {BOT_MULT}/{TOP_MULT}/{LR_MULT}/{LR_MULT})")

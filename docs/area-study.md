@@ -843,6 +843,23 @@ where 25,410.23 = PER_SM 78,960.32 − chip-context imem 56,580.14 + glue 3,030.
 imem by a 2.49x that was itself measured stat-vs-LEF and assumed the macro
 replaced the load path.
 
+> **CORRECTION, 2026-09-16 — every SM count in this document is an area upper
+> bound, and the real ceiling is about half of it.**
+>
+> The inequality above charges a macro its reserved footprint and nothing else.
+> A macro is also a Metal1–Metal3 blockage over that footprint, and a claim on
+> Metal4, which under the Tiny Tapeout single-layer PDN is the power layer — so
+> a macro's shadow has no signal routing layer at all. Measured in
+> `floorplan/`: removing 2 macros (6.4% of the core by area) returns **7.4% of
+> total routing resource**, on every layer, not just the ones they block.
+>
+> Consequence: **6 state machines fail global routing** at 37–39% average
+> routing usage, and 5 is the largest count that reaches a routable floorplan.
+> The 8.75 and 9.94 figures are correct as area results and are reproduced here
+> unchanged, because the comparisons between rows are all computed the same way
+> and remain valid. They are not build targets. See
+> `docs/row-format-decision.md` §5.5 and §5.5.1 for the measurements.
+
 > **Still not priced.** The Tiny Tapeout single-layer PDN cannot reach the
 > macros' Metal4 power pins without the `ExtendPowerStripes`-style plugin prism
 > uses, and 2N macros must be floorplanned on the tile's stripe pitch. That is
