@@ -308,26 +308,33 @@ one.
 
 **This does not reopen the freeze.** D beats C at every machine count, for the
 reasons in §2, and none of them are area arguments. What changes is not the row
-format but what we plan to build: **the target is now 5–6 state machines, not
-9.** A sweep of placement density and a grouped-macro floorplan is running to
-find which of those closes.
+format but what we plan to build: **the target is now 5 state machines, not 9.**
+The sweep settled it: 6 machines could not be made to route at any placement
+density or macro grouping, and 5 places and routes with zero router DRC errors.
+See `floorplan/README.md` for the eight-point sweep and the signoff run.
 
-**What is still true, and is the best news in this document.** The same run
-produced the first static timing analysis this project has ever had — §7 item 5
-called its absence "the largest verification gap in the study." Pre-place-and-
-route, at 50 MHz:
+**What is still true, and it is more mixed than the pre-route number suggested.**
+The same run produced the first static timing analysis this project has ever
+had — §7 item 5 called its absence "the largest verification gap in the study."
+The pre-place-and-route numbers looked good. The post-route numbers, measured on
+the routed 5-machine design with extracted parasitics, do not:
 
-| corner | setup | hold |
-|---|---|---|
-| slow, 1.08 V, 125 °C | **+1.596 ns MET** | +0.058 ns MET |
-| typ, 1.20 V, 25 °C | +6.035 ns MET | −0.044 ns VIOLATED |
-| fast, 1.32 V, −40 °C | +8.695 ns MET | −0.109 ns VIOLATED |
+| corner | pre-PnR setup | **post-PnR setup** | post-PnR hold |
+|---|---|---|---|
+| slow, 1.08 V, 125 °C | +1.596 MET | **−1.266 VIOLATED** | +0.506 MET |
+| typ, 1.20 V, 25 °C | +6.035 MET | +3.641 MET | +0.202 MET |
+| fast, 1.32 V, −40 °C | +8.695 MET | +6.483 MET | +0.016 MET |
 
-Setup meets 50 MHz at the slow corner with 1.6 ns of a 20 ns period, 8% margin.
-The hold violations are −44 ps and −109 ps before clock tree synthesis, which is
-what hold-fixing buffers exist for. This is estimated-parasitic STA with an
-ideal clock, so it is not the final word — but the gap is no longer "never run
-at any frequency," and the first answer it gave was the right one.
+Real parasitics cost 2.9 ns at the slow corner, turning an 8% margin into a 6%
+deficit. **Worst-case frequency is about 47 MHz, not 50.** Hold is met at every
+corner. The verification gap is closed in the sense that the number now exists;
+what it says is that 50 MHz does not currently close worst-case, with 115
+max-fanout, 4 max-slew and 1 max-cap violations outstanding — several of them
+artifacts of `obs`, an observability port that XOR-reduces signals from every
+machine into one pin, and of a `clk` net with 1,844 terminals. Neither belongs
+in a design meant to be taped out. Whether the target should be 50 MHz or
+47 MHz is an RTL-phase decision, not a floorplan one, and configuration D is
+different logic with different critical paths.
 
 #### 5.5.1 Why the ceiling is routing, quantified
 
@@ -457,8 +464,9 @@ for drift. Implementing them is RTL-phase work.
    or a density projection. No routing, no clock tree, no congestion. The
    template harden calibrates the die, not our logic.
 5. **Timing, at every level.** PARTLY SETTLED: §5.5 has the first STA, and 50 MHz
-   meets at the slow corner with 8% margin, pre-route. Still no STA on `stt_core`
-   alone, no post-route STA, and no SDF-back-annotated simulation on anything.
+   MISSES at the slow corner post-route by -1.266 ns (~47 MHz worst case), though
+   it met pre-route. Still no STA on `stt_core`
+   alone for the frozen format D, and no SDF-back-annotated simulation on anything.
    §5.3 explains why the cycle-accurate model cannot speak to pin timing at all: it has no pin path.
    Inter-pin skew between SCK/MOSI and SCL/SDA is the failure mode that matters
    and it is entirely unmeasured. That, not the frequency, is now **the largest

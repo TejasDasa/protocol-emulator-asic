@@ -105,3 +105,67 @@ run.
 
 See `docs/row-format-decision.md` §5.5 and §5.5.1 for what this does to the SM
 count and why the ceiling binds on routing rather than area.
+
+## Signoff run: 5 machines, 10 macros, interleaved, density 40
+
+Full flow with `GRT_ALLOW_CONGESTION` on (the chosen point had 1 overflow GCell
+of 355,982, which is noise) and signoff DRC enabled.
+
+**It places and routes.** The single global-routing overflow was resolved by
+detailed routing exactly as expected.
+
+| metric | value |
+|---|---|
+| `route__drc_errors` | **0** (263 → 25 → 3 → 0 across iterations) |
+| `route__wirelength` | 689,482 µm (estimate was 517,205) |
+| `route__vias` | 82,089, all single-cut |
+| `design__instance__count` | 49,272 (37,299 fill, 11,963 standard cells, 10 macros) |
+| `design__instance__area__stdcell` | 201,326 µm² |
+| `design__instance__area__macros` | 287,945 µm² |
+| `design__instance__utilization` | 54.2% |
+| hold buffers inserted | 2,218 |
+
+**The macros power.** Verified geometrically from the routed DEF, because the
+`ExtendPowerStripes` plugin never writes the ODB annotation (see
+`pdn_test/README.md`): all 10 macros, 8/8 VPWR and 7/7 VGND pin rectangles
+covered by their special net, and all 20 disconnected power pins in LibreLane's
+report belong to macros the geometry independently verified. The count scales
+exactly with macro count — 2 macros gave 2 in `pdn_test`, 10 give 10 here.
+
+**Timing does not close at 50 MHz.** This is the result that matters and it
+reverses the pre-route estimate.
+
+| corner | pre-PnR setup | **post-PnR setup** | post-PnR hold |
+|---|---|---|---|
+| slow, 1.08 V, 125 °C | +1.596 MET | **−1.266 VIOLATED** | +0.506 MET |
+| typ, 1.20 V, 25 °C | +6.035 MET | +3.641 MET | +0.202 MET |
+| fast, 1.32 V, −40 °C | +8.695 MET | +6.483 MET | +0.016 MET |
+
+Real parasitics cost 2.9 ns at the slow corner and turned an 8% margin into a
+6% deficit. **The worst-case frequency is about 47 MHz, not 50.** Hold is met at
+every corner, so the 2,218 hold buffers did their job; the pre-CTS hold
+violations reported earlier were never the problem.
+
+Contributing and unfixed: 115 max-fanout violations, 4 max-slew, 1 max-cap at
+the typical corner. The `obs` observability port XOR-reduces signals from every
+state machine into one pin, and `clk` has a fanout of 1,844 — both are artifacts
+of a module written to measure area, not to be taped out.
+
+**The flow stopped before signoff DRC.** `OpenROAD.IRDropReport` failed with
+`PSM-0069, Check connectivity failed on VPWR`, on full-height Metal4 stripes
+that `ExtendPowerStripes` added over the macro pin columns. This is the same ODB
+annotation gap as the disconnected-pin caveat, hitting a check that cannot be
+suppressed the same way. `pdn_test` passed this step with 2 macros and 5
+machines do not. **Magic and KLayout DRC therefore never ran**, so `route__drc_errors = 0`
+is the router's own check, not signoff DRC.
+
+### What this answers and what it does not
+
+Answered: **5 state machines is the floorplan.** It places, it routes with zero
+router DRC errors, and its macros are powered.
+
+Not answered, and both belong to the RTL phase rather than to more floorplan
+tuning: whether 50 MHz is the right target or whether ~47 MHz worst-case is
+acceptable, and signoff DRC/LVS, which need the IR-drop connectivity gap closed
+first. Note also that this is configuration C; the frozen format D is different
+logic and will have different critical paths.
