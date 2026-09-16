@@ -1,0 +1,254 @@
+{
+ "v2 baseline": {
+  "uart_tx": {
+   "bits": 195,
+   "rows": 5,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 2
+  },
+  "uart_rx": {
+   "bits": 312,
+   "rows": 8,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 3
+  },
+  "spi": {
+   "bits": 234,
+   "rows": 6,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 6.15
+  },
+  "i2c": {
+   "bits": 858,
+   "rows": 22,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 5.875
+  },
+  "usb": {
+   "bits": 624,
+   "rows": 16,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 5
+  }
+ },
+ "one target + flags": {
+  "uart_tx": {
+   "bits": 180,
+   "rows": 5,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 2
+  },
+  "uart_rx": {
+   "bits": 288,
+   "rows": 8,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 3
+  },
+  "spi": {
+   "bits": 216,
+   "rows": 6,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 6.15
+  },
+  "i2c": {
+   "bits": 792,
+   "rows": 22,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 5.875
+  },
+  "usb": {
+   "bits": 576,
+   "rows": 16,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 5
+  }
+ },
+ "one target + grouped actions": {
+  "uart_tx": {
+   "bits": 165,
+   "rows": 5,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 2
+  },
+  "uart_rx": {
+   "bits": 264,
+   "rows": 8,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 3
+  },
+  "spi": {
+   "bits": 198,
+   "rows": 6,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 6.15
+  },
+  "i2c": {
+   "bits": 726,
+   "rows": 22,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 5.875
+  },
+  "usb": {
+   "bits": 528,
+   "rows": 16,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 5
+  }
+ },
+ "per-program palette": {
+  "uart_tx": {
+   "bits": 140,
+   "rows": 5,
+   "tramps": 0,
+   "palette_bits": 75,
+   "ok": true,
+   "speed": 2
+  },
+  "uart_rx": {
+   "bits": 212,
+   "rows": 8,
+   "tramps": 0,
+   "palette_bits": 100,
+   "ok": true,
+   "speed": 3
+  },
+  "spi": {
+   "bits": 234,
+   "rows": 6,
+   "tramps": 0,
+   "palette_bits": 150,
+   "ok": true,
+   "speed": 6.15
+  },
+  "i2c": {
+   "bits": 655,
+   "rows": 22,
+   "tramps": 0,
+   "palette_bits": 325,
+   "ok": true,
+   "speed": 5.875
+  },
+  "usb": {
+   "bits": 540,
+   "rows": 16,
+   "tramps": 0,
+   "palette_bits": 300,
+   "ok": true,
+   "speed": 5
+  }
+ },
+ "per-program palette (grouped entries)": {
+  "uart_tx": {
+   "bits": 131,
+   "rows": 5,
+   "tramps": 0,
+   "palette_bits": 66,
+   "ok": true,
+   "speed": 2
+  },
+  "uart_rx": {
+   "bits": 200,
+   "rows": 8,
+   "tramps": 0,
+   "palette_bits": 88,
+   "ok": true,
+   "speed": 3
+  },
+  "spi": {
+   "bits": 216,
+   "rows": 6,
+   "tramps": 0,
+   "palette_bits": 132,
+   "ok": true,
+   "speed": 6.15
+  },
+  "i2c": {
+   "bits": 616,
+   "rows": 22,
+   "tramps": 0,
+   "palette_bits": 286,
+   "ok": true,
+   "speed": 5.875
+  },
+  "usb": {
+   "bits": 504,
+   "rows": 16,
+   "tramps": 0,
+   "palette_bits": 264,
+   "ok": true,
+   "speed": 5
+  }
+ },
+ "fixed palette in silicon": {
+  "uart_tx": {
+   "bits": 85,
+   "rows": 5,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 2
+  },
+  "uart_rx": {
+   "bits": 136,
+   "rows": 8,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 3
+  },
+  "spi": {
+   "bits": 102,
+   "rows": 6,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 6.15
+  },
+  "i2c": {
+   "bits": 374,
+   "rows": 22,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 5.875
+  },
+  "usb": {
+   "bits": 272,
+   "rows": 16,
+   "tramps": 0,
+   "palette_bits": 0,
+   "ok": true,
+   "speed": 5
+  }
+ }
+}

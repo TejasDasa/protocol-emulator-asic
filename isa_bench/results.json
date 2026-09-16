@@ -1,0 +1,122 @@
+{
+ "uart_tx/PIO": {
+  "pass": true,
+  "bits": 64,
+  "min_param": 2,
+  "bit_time": 2,
+  "units": 4
+ },
+ "uart_tx/STT": {
+  "pass": true,
+  "bits": 140,
+  "min_param": 2,
+  "bit_time": 2,
+  "units": 5,
+  "stt_version": 1,
+  "bits_v1": 140,
+  "bits_v2": 195
+ },
+ "uart_tx/RM": {
+  "pass": true,
+  "bits": 224,
+  "min_param": 5,
+  "bit_time": 5,
+  "units": 14
+ },
+ "uart_rx/PIO": {
+  "pass": true,
+  "bits": 144,
+  "min_param": 2,
+  "bit_time": 2,
+  "units": 9
+ },
+ "uart_rx/STT": {
+  "pass": true,
+  "bits": 224,
+  "min_param": 3,
+  "bit_time": 3,
+  "units": 8,
+  "stt_version": 1,
+  "bits_v1": 224,
+  "bits_v2": 312
+ },
+ "uart_rx/RM": {
+  "pass": true,
+  "bits": 256,
+  "min_param": 5,
+  "bit_time": 5,
+  "units": 16
+ },
+ "spi/PIO": {
+  "pass": true,
+  "bits": 192,
+  "min_param": 6,
+  "bit_time": 6.925,
+  "units": 12
+ },
+ "spi/STT": {
+  "pass": true,
+  "bits": 168,
+  "min_param": 6,
+  "bit_time": 6.15,
+  "units": 6,
+  "stt_version": 1,
+  "bits_v1": 168,
+  "bits_v2": 234
+ },
+ "spi/RM": {
+  "pass": true,
+  "bits": 336,
+  "min_param": 2,
+  "bit_time": 10.725,
+  "units": 21
+ },
+ "i2c/PIO": {
+  "pass": true,
+  "bits": 464,
+  "min_param": 4,
+  "bit_time": 6.083333333333333,
+  "units": 29
+ },
+ "i2c/STT": {
+  "pass": true,
+  "bits": 616,
+  "min_param": 4,
+  "bit_time": 5.875,
+  "units": 22,
+  "stt_version": 1,
+  "bits_v1": 616,
+  "bits_v2": 858
+ },
+ "i2c/RM": {
+  "pass": true,
+  "bits": 656,
+  "min_param": 4,
+  "bit_time": 11.916666666666666,
+  "units": 41
+ },
+ "usb/PIO": {
+  "pass": true,
+  "bits": 400,
+  "min_param": 6,
+  "bit_time": 6,
+  "units": 25
+ },
+ "usb/STT": {
+  "pass": true,
+  "bits": 624,
+  "min_param": 5,
+  "bit_time": 5,
+  "units": 16,
+  "stt_version": 2,
+  "bits_v1": null,
+  "bits_v2": 624
+ },
+ "usb/RM": {
+  "pass": true,
+  "bits": 832,
+  "min_param": 18,
+  "bit_time": 18,
+  "units": 52
+ }
+}

@@ -1,0 +1,82 @@
+{
+ "in-sample/uart_tx": {
+  "rows": 5,
+  "added": 0,
+  "loaded": 0,
+  "bits": 105,
+  "ok": true,
+  "speed": 2
+ },
+ "in-sample/uart_rx": {
+  "rows": 8,
+  "added": 0,
+  "loaded": 0,
+  "bits": 168,
+  "ok": true,
+  "speed": 3
+ },
+ "in-sample/spi": {
+  "rows": 8,
+  "added": 0,
+  "loaded": 0,
+  "bits": 168,
+  "ok": true,
+  "speed": 6.525
+ },
+ "in-sample/i2c": {
+  "rows": 22,
+  "added": 0,
+  "loaded": 0,
+  "bits": 462,
+  "ok": true,
+  "speed": 5.875
+ },
+ "in-sample/usb": {
+  "rows": 16,
+  "added": 0,
+  "loaded": 5,
+  "bits": 401,
+  "ok": true,
+  "speed": 5
+ },
+ "leave-one-out/uart_tx": {
+  "rows": 5,
+  "added": 0,
+  "loaded": 0,
+  "bits": 105,
+  "ok": true,
+  "speed": 2
+ },
+ "leave-one-out/uart_rx": {
+  "rows": 8,
+  "added": 0,
+  "loaded": 0,
+  "bits": 168,
+  "ok": true,
+  "speed": 3
+ },
+ "leave-one-out/spi": {
+  "rows": 8,
+  "added": 0,
+  "loaded": 0,
+  "bits": 168,
+  "ok": true,
+  "speed": 6.525
+ },
+ "leave-one-out/i2c": {
+  "rows": 22,
+  "added": 0,
+  "loaded": 1,
+  "bits": 475,
+  "ok": true,
+  "speed": 5.875
+ },
+ "leave-one-out/usb": {
+  "rows": 16,
+  "added": 0,
+  "loaded": 7,
+  "bits": 427,
+  "ok": true,
+  "speed": 5
+ }
+}

@@ -1,0 +1,28 @@
+# Canonical area-characterization script for the STT protocol emulator.
+#
+# This file is a template: `make area` substitutes the @...@ markers with sed
+# and writes the expanded script to build/<run>.ys, which is what Yosys actually
+# runs.  The expanded script is kept, so every number in docs/area-study.md has
+# a literal script next to it.  (Yosys does not expand shell variables inside
+# .ys files, hence the substitution.)
+#
+# Markers:
+#   @SOURCES@   space-separated Verilog sources
+#   @TOP@       top module
+#   @CHPARAM@   optional `-chparam NAME VALUE` pairs for the hierarchy pass
+#   @FLATTEN@   `flatten` for the true total, empty to preserve hierarchy
+#   @LIB@       absolute path to the typical-corner cmos5l liberty
+
+read_verilog -sv -I@RTL@ @SOURCES@
+hierarchy -check -top @TOP@ @CHPARAM@
+proc; opt
+@FLATTEN@
+memory_map
+opt -full
+techmap; opt
+dfflibmap -liberty @LIB@
+abc -liberty @LIB@ -D 20000
+setundef -zero
+splitnets
+opt_clean
+stat -liberty @LIB@

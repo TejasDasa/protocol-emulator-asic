@@ -1,0 +1,48 @@
+# ---- Windows / WSL interop -------------------------------------------------
+# NTFS "downloaded from the internet" markers. They appear as sidecar files
+# whenever the tree is copied through a Windows filesystem.
+*:Zone.Identifier
+Thumbs.db
+desktop.ini
+
+# ---- macOS ----------------------------------------------------------------
+.DS_Store
+
+# ---- Python (isa_bench models, scripts/) ----------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.venv-tt*/
+
+# ---- OCaml / dune (bin, lib, test) ----------------------------------------
+_build/
+*.install
+.merlin
+
+# ---- synthesis + area characterization ------------------------------------
+# `make area` regenerates every one of these: build/<run>.{ys,log,json}
+build/
+generated/
+
+# ---- EDA flow outputs ------------------------------------------------------
+# LibreLane / Tiny Tapeout harden products
+runs/
+tt_submission/
+*.gds
+*.lef.gz
+
+# ---- waveforms and dumps ---------------------------------------------------
+*.vcd
+*.fst
+*.ghw
+
+# ---- editors ---------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
