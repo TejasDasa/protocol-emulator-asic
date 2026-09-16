@@ -111,3 +111,28 @@ the two largest programs.
 | 32 fixed, leave-one-out, split fallback | 924 | 1575 | 31 rows, 10 cyc/bit |
 | 24 fixed + 8 loadable, leave-one-out | 916 | 1343 | 16 rows, 5 cyc/bit |
 | PIO | 864 | 1264* | |
+
+### Where the timing margin actually sits
+
+The `tol` default of 0.25 is generous, and tightening it changes nothing: the check is a
+*minimum*, and the nominals are anchored at or below the measured baseline, so the baseline
+still passes at `tol = 0`. The margin lives in the nominal, not the tolerance.
+
+Measuring it properly -- raise the required minimum at `tol = 0` until the baseline program
+violates it:
+
+| check | nominal | holds up to | margin |
+|---|---|---|---|
+| SPI SCK phase | 16 cycles (P/2) | 16.0 | **0%** |
+| I2C SCL low | 16 cycles (P/2) | 16.0 | **0%** |
+| I2C SCL high | 8 cycles (P/4) | 10.0 | 25% |
+
+**Two of the three have no slack at all.** The programs hit their bit period exactly, which is
+correct behaviour for a cycle-accurate model and a warning for silicon: any added delay in the
+pin-drive path -- output buffer, pad, board -- comes straight out of the phase, with nothing in
+hand. The 25% on SCL high is an artifact of the program using `thalf` there, not deliberate
+margin.
+
+This is why the tolerance is a parameter rather than a constant. It is the knob for asking
+"would this still work if the pin path cost us N cycles", and the answer today is no for SPI
+SCK and I2C SCL low at any N > 0.
