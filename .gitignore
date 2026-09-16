@@ -46,3 +46,11 @@ tt_submission/
 .idea/
 *.swp
 *~
+
+# LibreLane run outputs from the PDN integration test
+pdn_test/runs/
+# CFGMEM macro views: regenerable from DFFRAM, see pdn_test/README.md
+pdn_test/macro/
+# prism plugin: vendored copy, see pdn_test/README.md
+pdn_test/odb_stripes.py
+pdn_test/librelane_plugin_prism_pdn.py

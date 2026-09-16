@@ -1,0 +1,61 @@
+{
+  "//": "PDN integration test: one STT state machine whose instruction memory is",
+  "//": "two tiled CFGMEM_IHP16 macros. The question is whether the macros place",
+  "//": "and whether their Metal4 VPWR/VGND pins connect to the Tiny Tapeout",
+  "//": "single-layer PDN. Every PDN setting below is copied verbatim from the",
+  "//": "hardened TT template run (runs/wokwi/21-openroad-generatepdn/config.json).",
+
+  "DESIGN_NAME": "stt_core_cfgmem",
+  "VERILOG_FILES": [
+    "dir::src/stt_decode.v",
+    "dir::src/stt_palette.v",
+    "dir::src/stt_datapath.v",
+    "dir::src/stt_imem_cfgmem.v",
+    "dir::src/stt_core_cfgmem.v"
+  ],
+  "VERILOG_INCLUDE_DIRS": ["dir::src"],
+  "CLOCK_PORT": "clk",
+  "CLOCK_PERIOD": 20,
+
+  "//": "2x2 TT tile. One SM needs ~57,589 um2 of macro plus soft logic; a 2x2",
+  "//": "tile is 419.52 x 313.74 = 131,620 um2, which leaves real slack so that a",
+  "//": "failure here is a PDN failure and not a placement-density failure.",
+  "FP_SIZING": "absolute",
+  "DIE_AREA": "0 0 419.52 313.74",
+
+  "MACROS": {
+    "CFGMEM_IHP16": {
+      "gds": ["dir::macro/CFGMEM_IHP16.gds"],
+      "lef": ["dir::macro/CFGMEM_IHP16.lef"],
+      "nl":  ["dir::macro/CFGMEM_IHP16.nl.v"],
+      "spef": { "nom_*": ["dir::macro/CFGMEM_IHP16.nom.spef"] },
+      "lib":  { "*": ["dir::macro/CFGMEM_IHP16__nom_typ_1p20V_25C.lib"] },
+      "instances": {
+        "u_imem.g_tile[0].u_tile": { "location": [30, 40],  "orientation": "N" },
+        "u_imem.g_tile[1].u_tile": { "location": [30, 180], "orientation": "N" }
+      }
+    }
+  },
+
+  "//": "--- PDN, verbatim from the TT template ---",
+  "VDD_PIN": "VPWR",
+  "GND_PIN": "VGND",
+  "RT_MAX_LAYER": "Metal4",
+  "PDN_MULTILAYER": false,
+  "PDN_VERTICAL_LAYER": "Metal4",
+  "PDN_HORIZONTAL_LAYER": "TopMetal1",
+  "PDN_RAIL_LAYER": "Metal1",
+  "PDN_RAIL_WIDTH": 0.44,
+  "PDN_VPITCH": 50,
+  "PDN_VWIDTH": 2.1,
+  "PDN_VOFFSET": 10,
+  "PDN_VSPACING": 2,
+  "PDN_CONNECT_MACROS_TO_GRID": true,
+  "PDN_CORE_RING": false,
+
+  "PL_TARGET_DENSITY_PCT": 45,
+  "GRT_ALLOW_CONGESTION": 1,
+  "RUN_KLAYOUT_XOR": 0,
+  "RUN_KLAYOUT_DRC": 0,
+  "RUN_LINTER": 0
+}
