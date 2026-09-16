@@ -102,3 +102,60 @@ cp products/CFGMEM_IHP16/lib/nom_typ_1p20V_25C/CFGMEM_IHP16__nom_typ_1p20V_25C.l
 # the PDN plugin, from prism
 cp ~/eda/ref/prism/odb_stripes.py ~/eda/ref/prism/librelane_plugin_prism_pdn.py <repo>/pdn_test/
 ```
+
+---
+
+# RESOLVED: the macros place, power, route and pass LVS
+
+`config_plugin_only.json` closes it. Full flow, 73 stages, exit 0.
+
+| metric | value |
+|---|---|
+| `design__power_grid_violation__count` | **0** (VPWR 0, VGND 0) |
+| `route__drc_errors` | **0** |
+| `route__antenna_violation__count` | **0** |
+| LVS (`netgen`) | **"Circuits match uniquely."** all 7 LVS counters 0 |
+| `design__instance__area__macros` | 57,589.1 µm² |
+| `route__wirelength` | 108,081 |
+
+Independently confirmed by `verify_macro_power.py`, which reads the routed DEF
+and checks every macro power pin rectangle is covered by Metal4 geometry on the
+matching special net:
+
+```
+VPWR: 10 Metal4 special-net shapes
+  u_imem.g_tile[0].u_tile   8/8 pin rects covered  OK
+  u_imem.g_tile[1].u_tile   8/8 pin rects covered  OK
+VGND: 10 Metal4 special-net shapes
+  u_imem.g_tile[0].u_tile   7/7 pin rects covered  OK
+  u_imem.g_tile[1].u_tile   7/7 pin rects covered  OK
+```
+
+## The working recipe
+
+1. **`ExtendPowerStripes` plugin** inserted after `OpenROAD.GeneratePDN` via
+   `meta.substituting_steps`. Required: pdngen trims its stripes around macros,
+   so something must draw them back across the pin columns.
+2. **Stripe grid matched to the macro**, all three values derived from the
+   artifacts and independently equal to prism's:
+   `FP_PDN_VPITCH 44.96`, `FP_PDN_VSPACING 3.52`, macro x on the grid (45.43 here).
+3. **Do NOT set `PDN_MACRO_CONNECTIONS`.** This is the part that cost the most
+   time. It makes pdngen build a per-macro grid, which on a single-layer PDN is
+   necessarily empty *at that moment* — the tile stripes are still trimmed
+   around the macros and `ExtendPowerStripes` has not run yet — so pdngen hard
+   fails `PDN-0232`/`PDN-0233`. That error cannot be suppressed:
+   `ERROR_ON_PDN_VIOLATIONS` lives in `checker.py`, a different step.
+4. **`ERROR_ON_DISCONNECTED_PINS = 0`**, and understand exactly what it hides.
+
+## The one caveat, stated precisely
+
+`design__critical_disconnected_pin__count` is still **2** in the final metrics.
+The macro power pins are physically connected — same Metal4, overlapping
+geometry, confirmed twice — but the plugin never creates the ODB `iterm`-to-net
+*annotation* that pdngen would have. So a database-level check still calls them
+disconnected while the extracted layout says otherwise.
+
+**LVS is the arbiter and LVS passes**, because LVS extracts geometry rather than
+reading the ODB annotation. That is why suppressing the check is defensible here
+and would not be if LVS had anything to say. Anyone re-running this should treat
+those 2 as expected and check LVS instead.

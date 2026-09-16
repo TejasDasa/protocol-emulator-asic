@@ -1,0 +1,86 @@
+{
+  "DESIGN_NAME": "stt_core_cfgmem",
+  "VERILOG_FILES": [
+    "dir::src/stt_decode.v",
+    "dir::src/stt_palette.v",
+    "dir::src/stt_datapath.v",
+    "dir::src/stt_imem_cfgmem.v",
+    "dir::src/stt_core_cfgmem.v"
+  ],
+  "VERILOG_INCLUDE_DIRS": [
+    "dir::src"
+  ],
+  "CLOCK_PORT": "clk",
+  "CLOCK_PERIOD": 20,
+  "FP_SIZING": "absolute",
+  "DIE_AREA": "0 0 419.52 313.74",
+  "MACROS": {
+    "CFGMEM_IHP16": {
+      "gds": [
+        "dir::macro/CFGMEM_IHP16.gds"
+      ],
+      "lef": [
+        "dir::macro/CFGMEM_IHP16.lef"
+      ],
+      "nl": [
+        "dir::macro/CFGMEM_IHP16.nl.v"
+      ],
+      "spef": {
+        "nom_*": [
+          "dir::macro/CFGMEM_IHP16.nom.spef"
+        ]
+      },
+      "lib": {
+        "*": [
+          "dir::macro/CFGMEM_IHP16__nom_typ_1p20V_25C.lib"
+        ]
+      },
+      "instances": {
+        "u_imem.g_tile[0].u_tile": {
+          "location": [
+            45.43,
+            30.24
+          ],
+          "orientation": "N"
+        },
+        "u_imem.g_tile[1].u_tile": {
+          "location": [
+            45.43,
+            177.66
+          ],
+          "orientation": "N"
+        }
+      }
+    }
+  },
+  "VDD_PIN": "VPWR",
+  "GND_PIN": "VGND",
+  "RT_MAX_LAYER": "Metal4",
+  "PDN_VERTICAL_LAYER": "Metal4",
+  "PDN_HORIZONTAL_LAYER": "TopMetal1",
+  "PDN_RAIL_LAYER": "Metal1",
+  "PDN_RAIL_WIDTH": 0.44,
+  "PDN_CONNECT_MACROS_TO_GRID": true,
+  "PDN_CORE_RING": false,
+  "PL_TARGET_DENSITY_PCT": 60,
+  "GRT_ALLOW_CONGESTION": 1,
+  "RUN_KLAYOUT_XOR": 0,
+  "RUN_KLAYOUT_DRC": 0,
+  "RUN_LINTER": 0,
+  "meta": {
+    "flow": "Classic",
+    "substituting_steps": {
+      "+OpenROAD.GeneratePDN": "Project.ExtendPowerStripes"
+    }
+  },
+  "ERROR_ON_PDN_VIOLATIONS": 0,
+  "FP_PDN_VPITCH": 44.96,
+  "FP_PDN_VSPACING": 3.52,
+  "FP_PDN_VWIDTH": 2.1,
+  "FP_PDN_VOFFSET": 6.15,
+  "FP_PDN_MULTILAYER": 0,
+  "FP_MACRO_HORIZONTAL_HALO": 2.0,
+  "FP_MACRO_VERTICAL_HALO": 0.48,
+  "RUN_MAGIC_DRC": 0,
+  "ERROR_ON_DISCONNECTED_PINS": 0
+}

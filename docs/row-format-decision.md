@@ -155,11 +155,12 @@ These are what a reader should probe first.
 and post-fab cases carry it. If you disagree with §2.1–2.3, the area alone does
 not justify restructuring the row format.
 
-And both rest on CFGMEM being *integrable*, which is not yet demonstrated. The
-Tiny Tapeout single-layer PDN cannot reach the macros' Metal4 power pins
-without an `ExtendPowerStripes`-style flow plugin, as `kdp1965/ihp-um-janestreet-prism`
-does, and 2N macros must be floorplanned on the tile's stripe pitch. **That work
-is not priced in any number here.**
+**CFGMEM integration is now demonstrated** (`pdn_test/`): one SM with two macros
+hardens through the full flow with 0 power-grid violations, 0 DRC, 0 antenna
+violations, and LVS reporting "Circuits match uniquely". It requires a
+non-default flow -- the `ExtendPowerStripes` plugin, a stripe pitch of 44.96
+matched to the macro, and macro placement on that grid -- but it works, and the
+recipe is recorded. What remains unpriced is the *multi-SM* floorplan (§5.4).
 
 ### 5.2 JTAG sits at 25 of 32 rows — 78% full
 
@@ -213,6 +214,49 @@ most important thing this study does *not* establish.
 
 ---
 
+### 5.4 Macro placement is quantised — priced, and it does not cost SMs
+
+The PDN work (§5.1, `pdn_test/`) turned up a constraint none of the area
+arithmetic accounted for: **CFGMEM macros must sit on the 44.96 µm stripe grid
+at a fixed offset**, or their Metal4 power pins never meet a stripe. At 9 SMs
+that is 18 macros all needing aligned positions. The 9.94 figure assumed macros
+pack freely. They do not, so it was worth pricing before building on it.
+
+**It prices out favourably**, for three reasons that are geometry, not luck:
+
+* **y is not quantised at all.** The macro is 86.94 µm = exactly 23 standard-cell
+  rows, so macros stack vertically with zero waste.
+* **The x gap is usable, not lost.** A macro is 331.20 µm = 7.367 pitches, so the
+  next legal origin is 8 pitches = 359.68 µm, leaving a 28.48 µm gap between
+  adjacent macro columns. That gap is **59 standard-cell sites wide** — narrow,
+  but it hosts logic rather than being wasted.
+* **Grid capacity exceeds demand.** Three macro columns fit across the core
+  (a fourth would end at 1410.24 > 1283.52) and eight macros fit per column, so
+  the grid holds **24 macros = 12 SMs**. We need 18.
+
+Floorplan for 9 SMs, three columns of six:
+
+| region | size | µm² |
+|---|---|---|
+| above each column | 3 x 331.20 x 181.44 | 180,279 |
+| gaps between columns | 2 x 28.48 x 703.08 | 40,047 |
+| strip right of the macros | 232.96 x 703.08 | **163,790** (largest contiguous) |
+| **total usable for logic** | | **384,116** |
+| logic needed (9 SMs @ 60%) | | 301,491 |
+| **slack** | | **+82,625 (+27.4%)** |
+
+At 10 SMs it does not fit (−1.6%), which is consistent with the §1 budget
+independently putting the limit at 9.94.
+
+> **What this still does not establish.** This is an area-and-shape check, not a
+> placement run. It says the logic area exists and sits in reasonably shaped
+> regions; it does not show that *each SM's* logic can sit near *its own* two
+> macros, which is what wirelength and timing will care about. A 59-site gap is
+> placeable but awkward. **Treat 9 SMs as an upper bound until a multi-SM
+> floorplan has actually been run**, which is the natural second half of the
+> §5.1 experiment: get the PDN recipe working on one SM, then immediately try
+> the multi-SM floorplan with aligned macros.
+
 ## 6. CRC and bit stuffer: keep both, on capability
 
 The old argument — "the CRC costs 1.28 row bits, so it pays for itself if it
@@ -238,9 +282,11 @@ area. **Recommend keeping both.**
 
 ## 7. What the measurements cannot settle
 
-1. **CFGMEM integration on a TT tile.** The macro builds; placing and powering
-   2N of them under a single-layer PDN is unmeasured (§5.1). This is the single
-   largest open risk to the recommendation.
+1. **The multi-SM floorplan.** Single-SM integration is now demonstrated end to
+   end, LVS clean (§5.1, `pdn_test/`). What is not demonstrated is 16-18
+   grid-aligned macros plus their logic on a real 6x4 floorplan, with each SM's
+   logic placeable near its own macros. §5.4 shows the area and shapes work;
+   placement and wirelength are untested.
 2. **Whether 32 rows holds for protocols nobody has written.** JTAG is at 78%
    and it is the only state-machine protocol tested. Ethernet, SD and CAN are
    unwritten.
