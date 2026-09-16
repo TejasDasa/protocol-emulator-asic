@@ -1,40 +1,61 @@
 """Generate floorplan/config.json: NSM state machines, 2 CFGMEM_IHP16 macros each,
 on the measured 6x4 Tiny Tapeout die.
 
-Geometry is not free here. Two constraints come from pdn_test/README.md, both
-derived from artifacts rather than copied:
+Usage: gen_config.py [NSM] [DENSITY] [HHALO] [VHALO] [LAYOUT]
+       LAYOUT is "interleaved" (default) or "grouped".
 
-  * macro x must sit on a 44.96 um grid at offset 45.43, because the PDN has a
-    single vertical Metal4 layer and the macro's own VPWR/VGND pin columns are
-    on that pitch. Off-grid and the stripes miss the pins.
-  * macro y must be a multiple of the 3.78 um standard-cell row height, or the
-    macro does not sit on a site row.
+Geometry is not free here. Three constraints, all derived from artifacts rather
+than assumed:
 
-The macro is 331.20 x 86.94. Three fit across the 1283.52 um core if the column
-pitch is rounded UP to the next multiple of the stripe pitch: 331.20 / 44.96 =
-7.37, so 8 x 44.96 = 359.68. Three columns reach 45.43 + 2*359.68 + 331.20 =
-1095.99, inside the core with 187 um to spare. Four would need 1455.67.
+  * macro x must sit on a 44.96 um grid at offset 45.43. The PDN has a single
+    vertical Metal4 layer and the macro's own VPWR/VGND pin columns are on that
+    pitch; off-grid, the stripes miss the pins (pdn_test/README.md).
+  * macro y must be a multiple of the 3.78 um standard-cell row height.
+  * the IO margin multipliers must match the hardened TT template, or the core
+    silently shrinks. See CORE below.
 
-Each state machine's two macros are stacked in the same column, 79.38 um apart,
-so its logic can place beside its own memory. Two state machines per column,
-three columns: NSM = 6.
+CORE. LibreLane's defaults are BOTTOM/TOP_MARGIN_MULT 4 and LEFT/RIGHT 12; the
+hardened TT template uses 1 and 6. The multipliers are in site units (3.78 um
+rows, 0.48 um sites), so the defaults inset the core by 4*3.78 = 15.12 um top
+and bottom and 12*0.48 = 5.76 um left and right, against the template's 3.78 and
+2.88. That is 1277.76 x 680.40 = 869,369 um2 instead of 1283.52 x 703.08 =
+902,417 um2 -- a 3.7% loss, and 22.68 um of vertical routing channel, in a run
+that failed on local routing congestion. Measured from the ROW statements of
+both floorplan DEFs, not inferred. We set the template's values.
 
-Run:  python3 gen_config.py [NSM]   -> writes config.json
+LAYOUT. "interleaved" spreads the four macro rows through the core with logic
+between them, so each machine's logic sits beside its own memory. "grouped"
+packs all four rows into one contiguous block at the top with a single clear
+logic region below. The second exists because the macros block Metal1-3 under
+their footprint and Metal4 is the PDN layer, so there is effectively nowhere to
+route above a macro: interleaving forces signals to cross four macro shadows,
+grouping leaves clear channels.
+
+The macro is 331.20 x 86.94. Three fit across the 1283.52 um core once the
+column pitch is rounded UP to the next multiple of the stripe pitch (331.20 /
+44.96 = 7.37, so 8 x 44.96 = 359.68). Three columns reach 45.43 + 2*359.68 +
+331.20 = 1095.99; four would need 1455.67.
 """
 import json
 import re
 import sys
 
-NSM = int(sys.argv[1]) if len(sys.argv) > 1 else 6
-
+NSM     = int(sys.argv[1]) if len(sys.argv) > 1 else 6
+# Global placement target density. The first 6-SM run used 60, the TT template
+# value, while the design sits at ~58% instance utilization once the 12 macros
+# are counted -- leaving the placer almost no room to spread.
+DENSITY = int(sys.argv[2]) if len(sys.argv) > 2 else 60
+# Keep-out around each macro. Metal1-3 are blocked under the footprint, so cells
+# packed against a macro edge can only reach Metal4, which carries the PDN.
+HHALO   = float(sys.argv[3]) if len(sys.argv) > 3 else 2.0
+VHALO   = float(sys.argv[4]) if len(sys.argv) > 4 else 0.48
+LAYOUT  = sys.argv[5] if len(sys.argv) > 5 else "interleaved"
+assert LAYOUT in ("interleaved", "grouped"), LAYOUT
 
 # ---------------------------------------------------------------- the top
 # stt_chip_cfgmem.v is GENERATED from rtl/stt_chip.v rather than kept as a
 # second copy, so the floorplan cannot drift from the module the area study
 # measures. The only edits are the module name, the core instantiated, and NSM.
-HEADER = open("chip_header.txt").read()
-
-
 def gen_top(nsm):
     src = open("../rtl/stt_chip.v").read()
     body = src.split("\n", 2)[2]          # drop the 2-line original title comment
@@ -42,16 +63,21 @@ def gen_top(nsm):
     n = body.count("stt_core #(")
     assert n == 1, f"expected 1 stt_core instantiation in rtl/stt_chip.v, found {n}"
     body = body.replace("stt_core #(", "stt_core_cfgmem #(", 1)
-    body, k = re.subn(r"parameter NSM {8}= \d+", f"parameter NSM        = {nsm}", body, count=1)
+    body, k = re.subn(r"parameter NSM {8}= \d+", f"parameter NSM        = {nsm}",
+                      body, count=1)
     assert k == 1, "could not set the NSM default"
-    open("stt_chip_cfgmem.v", "w").write(HEADER + body)
+    open("stt_chip_cfgmem.v", "w").write(open("chip_header.txt").read() + body)
     return body.count("\n")
 
 
 # --- die, from the hardened TT template at tiles: "6x4" (docs/area-study.md 1.3)
 DIE_W, DIE_H = 1289.28, 710.64
-CORE_X0, CORE_Y0 = 2.88, 3.78
-CORE_W, CORE_H = 1283.52, 703.08
+ROW_H, SITE_W = 3.78, 0.48
+BOT_MULT, TOP_MULT, LR_MULT = 1, 1, 6          # the TT template's values
+CORE_X0 = LR_MULT * SITE_W                     # 2.88
+CORE_Y0 = BOT_MULT * ROW_H                     # 3.78
+CORE_W  = DIE_W - 2 * CORE_X0                  # 1283.52
+CORE_H  = DIE_H - CORE_Y0 - TOP_MULT * ROW_H   # 703.08
 
 # --- macro, from macro/CFGMEM_IHP16.lef
 MACRO_W, MACRO_H = 331.20, 86.94
@@ -59,23 +85,38 @@ MACRO_W, MACRO_H = 331.20, 86.94
 # --- PDN grid, from pdn_test/README.md "The geometry constraint"
 VPITCH = 44.96
 X0 = 45.43                      # first on-grid x that clears the core edge
-ROW_H = 3.78                    # standard cell row height; macro y must be a multiple
-
 COL_PITCH = VPITCH * 8          # 359.68: smallest multiple of VPITCH >= MACRO_W
 COLS = [X0 + i * COL_PITCH for i in range(3)]
 
-# --- y: 4 macros per column, gaps in whole rows, balanced top and bottom
-#     gaps below / between-a-pair / between-SMs / between-a-pair / above
-GAPS = [13, 21, 26, 21, 13]     # in rows of 3.78 um; sum*3.78 = 355.32 = slack
-YS = []
-y = CORE_Y0
-for i in range(4):
-    y += GAPS[i] * ROW_H
-    YS.append(round(y, 2))
-    y += MACRO_H
-assert abs((y + GAPS[4] * ROW_H) - (CORE_Y0 + CORE_H)) < 0.01, y
+# --- y placement
+def rows_to(um):
+    """Snap a gap to whole standard-cell rows."""
+    return round(um / ROW_H) * ROW_H
+
+if LAYOUT == "interleaved":
+    # gaps below / within a pair / between machines / within a pair / above,
+    # in whole rows, summing to the slack
+    GAPS = [13, 21, 26, 21, 13]
+    YS, y = [], CORE_Y0
+    for i in range(4):
+        y += GAPS[i] * ROW_H
+        YS.append(round(y, 2))
+        y += MACRO_H
+    assert abs((y + GAPS[4] * ROW_H) - (CORE_Y0 + CORE_H)) < 0.01, y
+else:
+    # one contiguous block at the top, a single row of clearance between macro
+    # rows, and one clear logic region filling everything below it
+    GAP = ROW_H
+    BLOCK_H = 4 * MACRO_H + 3 * GAP
+    top = CORE_Y0 + CORE_H - ROW_H                  # leave one row above
+    y0 = rows_to(top - BLOCK_H)
+    YS = [round(y0 + i * (MACRO_H + GAP), 2) for i in range(4)]
+    assert YS[0] > CORE_Y0, YS
+    LOGIC_BAND = YS[0] - CORE_Y0
+
 for v in YS:
     assert abs(v / ROW_H - round(v / ROW_H)) < 1e-6, f"y {v} off the row grid"
+    assert v >= CORE_Y0 and v + MACRO_H <= CORE_Y0 + CORE_H, f"macro y {v} outside core"
 for x in COLS:
     assert abs((x - X0) / VPITCH - round((x - X0) / VPITCH)) < 1e-6, f"x {x} off grid"
 assert COLS[-1] + MACRO_W <= CORE_X0 + CORE_W, "columns overflow the core"
@@ -83,7 +124,7 @@ assert COLS[-1] + MACRO_W <= CORE_X0 + CORE_W, "columns overflow the core"
 instances = {}
 for sm in range(NSM):
     col = COLS[sm // 2]
-    lo = (sm % 2) * 2           # SM 0 gets y[0],y[1]; SM 1 gets y[2],y[3]
+    lo = (sm % 2) * 2           # machine 0 gets y[0],y[1]; machine 1 gets y[2],y[3]
     for t in range(2):
         instances[f"g_sm[{sm}].u_core.u_imem.g_tile[{t}].u_tile"] = {
             "location": [round(col, 2), YS[lo + t]],
@@ -104,6 +145,12 @@ cfg = {
     "CLOCK_PERIOD": 20,                      # 50 MHz
     "FP_SIZING": "absolute",
     "DIE_AREA": f"0 0 {DIE_W} {DIE_H}",
+    # match the hardened TT template; LibreLane's defaults (4/4/12/12) cost
+    # 33,048 um2 of core and 22.68 um of vertical routing channel
+    "BOTTOM_MARGIN_MULT": BOT_MULT,
+    "TOP_MARGIN_MULT": TOP_MULT,
+    "LEFT_MARGIN_MULT": LR_MULT,
+    "RIGHT_MARGIN_MULT": LR_MULT,
     "MACROS": {"CFGMEM_IHP16": {
         "gds": ["dir::macro/CFGMEM_IHP16.gds"],
         "lef": ["dir::macro/CFGMEM_IHP16.lef"],
@@ -126,9 +173,9 @@ cfg = {
     "PDN_VWIDTH": 2.1,
     "PDN_VOFFSET": 6.15,
     "PDN_MULTILAYER": 0,
-    "FP_MACRO_HORIZONTAL_HALO": 2.0,
-    "FP_MACRO_VERTICAL_HALO": 0.48,
-    "PL_TARGET_DENSITY_PCT": 60,
+    "FP_MACRO_HORIZONTAL_HALO": HHALO,
+    "FP_MACRO_VERTICAL_HALO": VHALO,
+    "PL_TARGET_DENSITY_PCT": DENSITY,
     # Congestion is one of the things this run is for, so do NOT allow it.
     "GRT_ALLOW_CONGESTION": 0,
     "RUN_KLAYOUT_XOR": 0,
@@ -147,11 +194,19 @@ cfg = {
 
 lines = gen_top(NSM)
 json.dump(cfg, open("config.json", "w"), indent=2)
-print(f"NSM={NSM}  macros={len(instances)}  top regenerated from ../rtl/stt_chip.v ({lines} lines)")
-print(f"  columns x: {[round(c,2) for c in COLS]}  (pitch {COL_PITCH}, "
-      f"right edge {round(COLS[-1]+MACRO_W,2)} of {CORE_X0+CORE_W})")
-print(f"  rows    y: {YS}  (macro height {MACRO_H})")
-print(f"  macro area: {len(instances)} x {round(MACRO_W*MACRO_H,2)} = "
-      f"{round(len(instances)*MACRO_W*MACRO_H,2)} um2 of "
-      f"{round(CORE_W*CORE_H,2)} um2 core "
-      f"({100*len(instances)*MACRO_W*MACRO_H/(CORE_W*CORE_H):.1f}%)")
+
+macro_area = len(instances) * MACRO_W * MACRO_H
+core_area = CORE_W * CORE_H
+print(f"NSM={NSM}  macros={len(instances)}  layout={LAYOUT}  density={DENSITY}%  "
+      f"halo={HHALO}/{VHALO}")
+print(f"  top regenerated from ../rtl/stt_chip.v ({lines} lines)")
+print(f"  core: {CORE_W} x {CORE_H} = {core_area:.0f} um2 "
+      f"(margins {BOT_MULT}/{TOP_MULT}/{LR_MULT}/{LR_MULT})")
+print(f"  columns x: {[round(c, 2) for c in COLS]}  pitch {COL_PITCH}, "
+      f"right edge {round(COLS[-1] + MACRO_W, 2)} of {CORE_X0 + CORE_W}")
+print(f"  rows    y: {YS}")
+if LAYOUT == "grouped":
+    print(f"  contiguous logic region below the block: {LOGIC_BAND:.2f} um tall, "
+          f"full width")
+print(f"  macro area: {len(instances)} x {MACRO_W * MACRO_H:.2f} = {macro_area:.0f} "
+      f"um2 = {100 * macro_area / core_area:.1f}% of core")

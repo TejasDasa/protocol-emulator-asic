@@ -27,6 +27,12 @@ difference is entirely in the logic around it.
 | reserved macro area per SM | 0 | 0 | 57,589.06 | 57,589.06 |
 | **SMs @ 50%** | 5.50 | 4.03 | **8.01** | **9.24** |
 | **SMs @ 60%** (TT default) | 6.64 | 4.87 | **8.75** | **9.94** |
+
+> These SM counts are **area** results and are superseded as build targets by
+> §5.5: a 6-SM floorplan fails global routing at 37% average routing usage, so
+> routing resource binds before area does. The comparison between the columns is
+> unaffected — every column is computed the same way — but the absolute numbers
+> are upper bounds, not plans. The target is 5-6 machines.
 | palette holds? | yes, 32 entries | yes | yes | n/a — no palette |
 
 A and B are shown because B is the trap: **32-bit rows without CFGMEM are worse
@@ -253,9 +259,75 @@ independently putting the limit at 9.94.
 > regions; it does not show that *each SM's* logic can sit near *its own* two
 > macros, which is what wirelength and timing will care about. A 59-site gap is
 > placeable but awkward. **Treat 9 SMs as an upper bound until a multi-SM
-> floorplan has actually been run**, which is the natural second half of the
+> floorplan has actually been run** — it now has been, and the bound does not
+> hold: see §5.5. Everything in this subsection stands as an area-and-shape
+> result and none of it was ever a routability claim, which is the natural second half of the
 > §5.1 experiment: get the PDN recipe working on one SM, then immediately try
 > the multi-SM floorplan with aligned macros.
+
+### 5.5 The multi-SM floorplan has now been run, and 9 SMs is falsified
+
+**2026-09-16.** §5.4 closed by saying "treat 9 SMs as an upper bound until a
+multi-SM floorplan has actually been run." It has been run (`floorplan/`), and
+the upper bound does not hold. **Routing resource binds well before area does,
+and none of the arithmetic in this document counts routing resource.**
+
+The first 6-SM run, interleaved macros at the Tiny Tapeout target density,
+**failed global routing**: `GRT-0116, Global routing finished with congestion`.
+What makes that decisive is not the failure but the numbers underneath it:
+
+| layer | resource | demand | usage |
+|---|---|---|---|
+| Metal2 | 98,472 | 40,839 | 41.5% |
+| Metal3 | 144,521 | 75,092 | 52.0% |
+| Metal4 | 95,853 | 10,463 | **10.9%** |
+| **total** | **338,846** | **126,394** | **37.3%** |
+
+Total overflow 104 GCells; 1,252,555 µm of wirelength over 14,206 nets. A design
+does not fail routing at 37% average usage because it ran out of resource. It
+fails because the resource is in the wrong place.
+
+**The structural reason, which no parameter fixes.** The CFGMEM macro blocks
+Metal1–Metal3 under its entire footprint, and Metal4 is the PDN's vertical
+layer. Above a macro there is therefore effectively nowhere to route — which is
+why Metal4 sits at 10.9% while Metal3 is at 52%. Twelve macros put 28,188
+blockages on the die. Interleaving the macro rows through the core, so each
+machine's logic sits beside its own memory, forces every vertical signal to
+cross four macro shadows. That trade — locality against routability — is not
+visible in an area budget at all.
+
+**What this does to the SM count.** At 6 machines the design measures 9,898
+instances: 9,886 standard cells at 178,987 µm² plus 12 macros at 345,534 µm²,
+which is 58.1% of the 902,417 µm² core. At 9 machines the macros **alone** are
+18 × 28,794.53 = 518,302 µm², or **57.4% of the core before a single gate of
+logic is placed** — essentially the entire budget the 6-machine design used in
+total, and that design did not route. The 9.94 figure in §1 and the +27.4%
+slack in §5.4 are area-and-shape results and remain correct as area-and-shape
+results. They were never a routability claim, and they should not be read as
+one.
+
+**This does not reopen the freeze.** D beats C at every machine count, for the
+reasons in §2, and none of them are area arguments. What changes is not the row
+format but what we plan to build: **the target is now 5–6 state machines, not
+9.** A sweep of placement density and a grouped-macro floorplan is running to
+find which of those closes.
+
+**What is still true, and is the best news in this document.** The same run
+produced the first static timing analysis this project has ever had — §7 item 5
+called its absence "the largest verification gap in the study." Pre-place-and-
+route, at 50 MHz:
+
+| corner | setup | hold |
+|---|---|---|
+| slow, 1.08 V, 125 °C | **+1.596 ns MET** | +0.058 ns MET |
+| typ, 1.20 V, 25 °C | +6.035 ns MET | −0.044 ns VIOLATED |
+| fast, 1.32 V, −40 °C | +8.695 ns MET | −0.109 ns VIOLATED |
+
+Setup meets 50 MHz at the slow corner with 1.6 ns of a 20 ns period, 8% margin.
+The hold violations are −44 ps and −109 ps before clock tree synthesis, which is
+what hold-fixing buffers exist for. This is estimated-parasitic STA with an
+ideal clock, so it is not the final word — but the gap is no longer "never run
+at any frequency," and the first answer it gave was the right one.
 
 ## 6. CRC and bit stuffer: keep both, on capability
 
@@ -275,7 +347,7 @@ bits when row bits are nearly free. The right question is capability against the
   paths, each with its own counter. That is a row-count cost on exactly the
   state-machine-shaped protocols that §5.2 says are already the tight case.
 
-Together 4,430.16 µm², 26.1% of the fixed budget, against 8-9 SMs of per-SM
+Together 4,430.16 µm², 26.1% of the fixed budget, against 5-6 SMs of per-SM
 area. **Recommend keeping both.**
 
 ### 6.1 The capability argument had no encoding path — it does now
@@ -319,11 +391,11 @@ for drift. Implementing them is RTL-phase work.
 
 ## 7. What the measurements cannot settle
 
-1. **The multi-SM floorplan.** Single-SM integration is now demonstrated end to
-   end, LVS clean (§5.1, `pdn_test/`). What is not demonstrated is 16-18
-   grid-aligned macros plus their logic on a real 6x4 floorplan, with each SM's
-   logic placeable near its own macros. §5.4 shows the area and shapes work;
-   placement and wirelength are untested.
+1. **The multi-SM floorplan.** SETTLED, and against us: see §5.5. Twelve
+   macros and six machines fail global routing at 37% average routing usage,
+   because the macros block Metal1-3 and Metal4 is the PDN layer. The target is
+   now 5-6 machines, not 9. What remains open is which of 5 or 6 closes, and
+   whether a grouped-macro floorplan beats an interleaved one.
 2. **Whether 32 rows holds for protocols nobody has written.** JTAG is at 78%
    and it is the only state-machine protocol tested. Ethernet, SD and CAN are
    unwritten.
@@ -332,12 +404,13 @@ for drift. Implementing them is RTL-phase work.
 4. **Post-P&R area for our own design.** Every per-SM figure is `stat` cell area
    or a density projection. No routing, no clock tree, no congestion. The
    template harden calibrates the die, not our logic.
-5. **Timing, at every level.** No STA has been run on `stt_core`, and no
-   SDF-back-annotated simulation on anything. §5.3 explains why the
-   cycle-accurate model cannot speak to pin timing at all: it has no pin path.
+5. **Timing, at every level.** PARTLY SETTLED: §5.5 has the first STA, and 50 MHz
+   meets at the slow corner with 8% margin, pre-route. Still no STA on `stt_core`
+   alone, no post-route STA, and no SDF-back-annotated simulation on anything.
+   §5.3 explains why the cycle-accurate model cannot speak to pin timing at all: it has no pin path.
    Inter-pin skew between SCK/MOSI and SCL/SDA is the failure mode that matters
-   and it is entirely unmeasured. **This is the largest verification gap in the
-   study**, and the first thing the next sixteen weeks should close.
+   and it is entirely unmeasured. That, not the frequency, is now **the largest
+   verification gap in the study**.
 6. **Whether the 13-bit grouping is right.** C and D share it. The 1.37%
    reachability of all action subsets is a design choice nobody has re-examined
    since it was set.
