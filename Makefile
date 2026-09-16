@@ -125,7 +125,15 @@ area-cfgmem: lib-check
 	$(call RUN,cfgmem32,stt_imem_cfgmem,$(CFGMEM_SRCS),,flatten -noscopeinfo,chparam -set NTILE 2 -set ROWS 32 stt_imem_cfgmem)
 	$(call RUN,cfgmem64,stt_imem_cfgmem,$(CFGMEM_SRCS),,flatten -noscopeinfo,chparam -set NTILE 4 -set ROWS 64 -set ADDR_W 6 stt_imem_cfgmem)
 
-area: area-core area-imem area-extras area-timer area-fifo area-roww area-chip area-cfgmem
+# ---- row-bit cost under tiled CFGMEM. Storage is 2 macros for any width up to
+# 32, so the only width-dependent cost is the glue (staging register + Di path).
+area-cfgmem-width: lib-check
+	$(call RUN,cfgw21,stt_imem_cfgmem,$(CFGMEM_SRCS),,flatten -noscopeinfo,chparam -set NTILE 2 -set ROWS 32 -set ROW_W 21 stt_imem_cfgmem)
+	$(call RUN,cfgw26,stt_imem_cfgmem,$(CFGMEM_SRCS),,flatten -noscopeinfo,chparam -set NTILE 2 -set ROWS 32 -set ROW_W 26 stt_imem_cfgmem)
+	$(call RUN,cfgw29,stt_imem_cfgmem,$(CFGMEM_SRCS),,flatten -noscopeinfo,chparam -set NTILE 2 -set ROWS 32 -set ROW_W 29 stt_imem_cfgmem)
+	$(call RUN,cfgw32,stt_imem_cfgmem,$(CFGMEM_SRCS),,flatten -noscopeinfo,chparam -set NTILE 2 -set ROWS 32 -set ROW_W 32 stt_imem_cfgmem)
+
+area: area-core area-imem area-extras area-timer area-fifo area-roww area-chip area-cfgmem area-cfgmem-width
 	@python3 scripts/check_slope.py $(BUILD)
 	@python3 scripts/summarize_area.py $(BUILD)
 

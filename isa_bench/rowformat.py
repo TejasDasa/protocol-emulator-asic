@@ -35,9 +35,14 @@ def act_key(r):
 
 
 class Format:
-    def __init__(self, pins, acts, storage=None, palette=None):
+    def __init__(self, pins, acts, storage=None, palette=None, tgt_bits=5):
         self.pins, self.acts, self.storage = pins, acts, storage
         self.palette = palette          # silicon palette (list of keys) if storage == "silicon"
+        # Branch-target field width. 5 is the 21-bit row (31 reachable rows,
+        # code 31 = RET). The 32-bit row widens it to 8 because the bits are
+        # free there, not because 5 was binding -- see docs/row-format-decision.md.
+        self.tgt_bits = tgt_bits
+        self.ret = (1 << tgt_bits) - 1
 
     @property
     def label(self):
@@ -73,8 +78,8 @@ class Format:
         packed, widths = [], None
         for x in lay:
             r = x["row"]
-            tgt = RET if x["target"] == "ret" else (names.index(x["target"]) if x["target"] else 0)
-            f = [(TESTS.index(r.test), 4), (x["mode"], 2), (tgt, 5)]
+            tgt = self.ret if x["target"] == "ret" else (names.index(x["target"]) if x["target"] else 0)
+            f = [(TESTS.index(r.test), 4), (x["mode"], 2), (tgt, self.tgt_bits)]
             if self.pins == "slots3":
                 f += [(PINOPS.index(r.pins.get(s, "hold")), 3) for s in range(3)]
             elif self.pins == "single5":
@@ -122,7 +127,7 @@ class Format:
                 acts = list(acts)
             extras.append(dict(name=names[i], test=test, mode=mode,
                                target=None if mode == 3 else tgt, pins=pins, acts=acts))
-        dec = rebuild(lay, extras)
+        dec = rebuild(lay, extras, ret=self.ret)
         pal_bits = 0
         if self.acts == "palette" and self.storage == "program":
             pal_bits = (len(pal) - 1) * self.entry_width()

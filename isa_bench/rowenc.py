@@ -168,14 +168,20 @@ def flags_decode(bits):
     return [a for a, b in zip(ACTS, bits) if b]
 
 
-def rebuild(layout, extras):
-    """Turn a decoded layout back into an SttProgram with explicit targets."""
+def rebuild(layout, extras, ret=RET):
+    """Turn a decoded layout back into an SttProgram with explicit targets.
+
+    `ret` is the target code meaning "return to the link register". It is the
+    all-ones value of the target field, so it moves with the field width:
+    31 for the 5-bit target of the 21-bit row, 255 for the 8-bit target of the
+    32-bit row. Defaults to the 5-bit value so existing callers are unchanged.
+    """
     names = [x["name"] for x in extras]
     rows = []
     for i, x in enumerate(extras):
         nxt = names[i + 1] if i + 1 < len(names) else names[0]
         me = names[i]
-        tgt = "ret" if x["target"] == RET else (names[x["target"]] if x["target"] is not None else None)
+        tgt = "ret" if x["target"] == ret else (names[x["target"]] if x["target"] is not None else None)
         mode = x["mode"]
         if mode == 0:
             t, f = tgt, me
