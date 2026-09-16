@@ -43,13 +43,16 @@ lib-check:
 	@echo -n "  library: "; grep -m1 -oP '^library \(\K[^)]+' "$(LIB)"
 
 # ------------------------------------------------------------------- runs
-# $(1) run name  $(2) top  $(3) sources  $(4) chparam  $(5) flatten
+# $(1) run name  $(2) top  $(3) sources  	     -e 's|@CHPARAM@|$(4)|g' \
+	     -e 's|@PRE@|$(6)|g' \
+ chparam  $(5) flatten  $(6) pre
 define RUN
 	@mkdir -p $(BUILD)
 	@sed -e 's|@RTL@|$(RTL)|g' \
 	     -e 's|@SOURCES@|$(3)|g' \
 	     -e 's|@TOP@|$(2)|g' \
 	     -e 's|@CHPARAM@|$(4)|g' \
+	     -e 's|@PRE@|$(6)|g' \
 	     -e 's|@FLATTEN@|$(5)|g' \
 	     -e 's|@LIB@|$(LIB)|g' \
 	     synth/synth.ys > $(BUILD)/$(1).ys
@@ -95,7 +98,24 @@ area-roww: lib-check
 	$(call RUN,roww22,stt_imem,$(RTL)/stt_imem.v,-chparam ROWS 32 -chparam ADDR_W 5 -chparam ROW_W 22,flatten -noscopeinfo)
 	$(call RUN,roww24,stt_imem,$(RTL)/stt_imem.v,-chparam ROWS 32 -chparam ADDR_W 5 -chparam ROW_W 24,flatten -noscopeinfo)
 
-area: area-core area-imem area-extras area-timer area-fifo area-roww
+# ---- multi-SM chip: fixed overhead + N x per-SM, at the real TT boundary.
+# Fitting a line through these gives a defensible SM count (docs 7).
+CHIP_SRCS := $(CORE_SRCS) $(RTL)/stt_fifo.v $(RTL)/stt_hostbuf.v \
+             $(RTL)/stt_iomux.v $(RTL)/crc_lfsr16.v $(RTL)/bit_stuffer.v \
+             $(RTL)/stt_chip.v
+
+# NOTE: `hierarchy -chparam NSM n` trips a Yosys 0.69 assertion on this top
+# (it derives $paramod\\stt_chip\\NSM=n twice). `chparam -set` before
+# hierarchy is equivalent and works, so the chip sweep uses $(6) not $(4).
+area-chip: lib-check
+	$(call RUN,chip1,stt_chip,$(CHIP_SRCS),,flatten -noscopeinfo,chparam -set NSM 1 stt_chip)
+	$(call RUN,chip2,stt_chip,$(CHIP_SRCS),,flatten -noscopeinfo,chparam -set NSM 2 stt_chip)
+	$(call RUN,chip3,stt_chip,$(CHIP_SRCS),,flatten -noscopeinfo,chparam -set NSM 3 stt_chip)
+	$(call RUN,chip4,stt_chip,$(CHIP_SRCS),,flatten -noscopeinfo,chparam -set NSM 4 stt_chip)
+	$(call RUN,chip5,stt_chip,$(CHIP_SRCS),,flatten -noscopeinfo,chparam -set NSM 5 stt_chip)
+	$(call RUN,chip3_hier,stt_chip,$(CHIP_SRCS),,,chparam -set NSM 3 stt_chip)
+
+area: area-core area-imem area-extras area-timer area-fifo area-roww area-chip
 	@python3 scripts/summarize_area.py $(BUILD)
 
 check:

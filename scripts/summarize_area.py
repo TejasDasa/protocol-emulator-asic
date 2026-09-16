@@ -19,9 +19,17 @@ import sys
 # 6x4 = 24 tiles ~ 0.7 mm^2.  This is the *nominal* figure, not a measured
 # one; --tile-um2 overrides it once the template baseline run gives a real
 # number.  Flagged as nominal in every line that uses it.
-# superseded by the measured core areas in main(); kept for reference only
+# superseded by the measured core areas below; kept for reference only
 NOMINAL_24_TILE_UM2 = 700_000.0
 ROW_W = 21
+
+# 6x4 core: design__core__area from hardening the TT template at tiles "6x4"
+# (916,214 die / 902,417 core). Matches the 6x4 DEF row geometry, 2674 sites
+# x 0.48 by 186 rows x 3.78, exactly. See docs/area-study.md section 1.3.
+CORE_6x4 = 902417.2
+# 8x4 has NO DEF template and no tile_sizes entry for cmos5l: this is a
+# tile-pitch extrapolation, not a flow result.
+CORE_8x4 = 1208172.7
 
 
 def load(build):
@@ -220,6 +228,51 @@ def main():
                   "33 x 48.9888 = 1616.6, so the logic is the rest)")
         print()
 
+    # ------------------------------------------- multi-SM chip: fit + solve N
+    chips = [(int(n[4:]), runs[n]) for n in runs
+             if n.startswith("chip") and n[4:].isdigit() and runs[n].get("valid")]
+    chips.sort()
+    if len(chips) >= 2:
+        pts = []
+        rows = []
+        prev = None
+        for nsm, run in chips:
+            _, d = top_of(run, "stt_chip")
+            a = d["area_um2"]
+            pts.append((nsm, a))
+            delta = "" if prev is None else f"{a-prev:.2f}"
+            prev = a
+            rows.append([nsm, d["cells"], d["flops"], f"{a:.2f}", delta])
+        print("## multi-SM chip sweep (stt_chip at the TT boundary)\n")
+        print(table(rows, ["NSM", "cells", "flops", "um2", "delta"]))
+
+        n = len(pts)
+        sx = sum(p[0] for p in pts); sy = sum(p[1] for p in pts)
+        sxx = sum(p[0]*p[0] for p in pts); sxy = sum(p[0]*p[1] for p in pts)
+        slope = (n*sxy - sx*sy) / (n*sxx - sx*sx)
+        inter = (sy - slope*sx) / n
+        my = sy/n
+        ssr = sum((a - (inter+slope*k))**2 for k, a in pts)
+        sst = sum((a - my)**2 for k, a in pts)
+        r2 = 1 - ssr/sst if sst else float("nan")
+        print(f"\n  area(N) = {inter:.2f} + N x {slope:.2f} um2   (R^2 = {r2:.6f})")
+        print(f"  FIXED  = {inter:.2f} um2   (shared blocks, N-independent part)")
+        print(f"  PER_SM = {slope:.2f} um2   (replicated + N-dependent glue)")
+
+        budget = args.tile_um2 or CORE_6x4
+        usable = budget * args.density
+        nmax = (usable - inter) / slope
+        print(f"\n  against {budget:.0f} um2 core at {100*args.density:.0f}% density "
+              f"({usable:.0f} usable):")
+        print(f"    N = ({usable:.0f} - {inter:.2f}) / {slope:.2f} = {nmax:.2f} "
+              f"-> {int(nmax)} SMs")
+        print("\n  density each N would need:")
+        for k in range(max(1, int(nmax)-2), int(nmax)+3):
+            a = inter + k*slope
+            print(f"    N={k}: {a:10.0f} um2 = {100*a/budget:5.1f}% of core"
+                  + ("   <- planning number" if k == int(nmax) else ""))
+        print()
+
     # --------------------------------------------------------- fixed vs per-SM
     if core_area is not None and "core_hier" in runs and runs["core_hier"].get("valid"):
         mods = runs["core_hier"]["modules"]
@@ -242,28 +295,11 @@ def main():
                   f"NOT shareable if SMs run different programs.")
         print(f"per-SM (decode + datapath + imem + loadable palette): {per_sm:.2f} um2")
         print()
-
-        # Core (not die) areas, measured via the hardened TT template: the
-        # die->core inset is absolute (6*0.48 um per side horizontally,
-        # 1*3.78 um vertically), confirmed against design__core__area.
-        # See docs/area-study.md section 1.2.
-        CORE_6x4 = 902417.2
-        CORE_8x4 = 1208172.7      # 8x4 die inferred from the tile_sizes pattern
-        budget = args.tile_um2 or CORE_6x4
-        tag = "user-supplied" if args.tile_um2 else "measured 6x4 core, docs/area-study.md 1.2"
-        usable = budget * args.density
-        n_sm = (usable - shareable) / per_sm if per_sm > 0 else 0
-        print(f"## how many SMs fit ({tag})\n")
-        print(f"core area {budget:.0f} um2; at {100*args.density:.0f}% density "
-              f"= {usable:.0f} um2 usable")
-        print(f"  ({usable:.0f} - {shareable:.2f} shared) / {per_sm:.2f} per SM "
-              f"= {n_sm:.2f} SMs")
-        if not args.tile_um2:
-            u8 = CORE_8x4 * args.density
-            n8 = (u8 - shareable) / per_sm if per_sm > 0 else 0
-            print(f"8x4 core {CORE_8x4:.0f} um2 (die inferred); at "
-                  f"{100*args.density:.0f}% = {u8:.0f} um2 usable -> {n8:.2f} SMs "
-                  f"(+{n8-n_sm:.2f})")
+        print("  ^ this is the naive split and is SUPERSEDED. It counts only the")
+        print("    palette as shared and ignores the host buffering, CRC, stuffer,")
+        print("    pin-assignment logic and chip glue. Use the fitted")
+        print("    area(N) = FIXED + N x PER_SM from the chip sweep above; run")
+        print("    `make area-chip` if that section is missing.")
         print()
     print("NOTE: Yosys `stat` area is standard-cell area only. It excludes the "
           "clock tree, fill and tap cells, and all routing, so it is a lower "

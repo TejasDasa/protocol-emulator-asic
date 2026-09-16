@@ -54,7 +54,7 @@ RTLIL cells. `check_area.py` distinguishes the two.
 export PATH="$HOME/eda/oss-cad-suite/bin:$PATH"   # Yosys 0.69+62
 export PDK_ROOT="$HOME/pdk"                       # IHP-Open-PDK dev 2bbec755
 cd ~/projects/protocol-emulator-asic-competition
-make area          # all 18 runs + the summary tables
+make area          # all 24 runs + the summary tables
 make check         # re-verify the validity gate on existing logs
 
 # or individually:
@@ -64,6 +64,7 @@ make area-extras   # CRC/LFSR and bit stuffer
 make area-timer    # A1: TIMER_W = 8,12,16,20,24
 make area-fifo     # A6: in-core FIFOs at depth 2,4,8
 make area-roww     # row width = 20,21,22,24
+make area-chip     # stt_chip at NSM = 1..5, the budget model (section 7)
 ```
 
 Each run writes `build/<name>.ys` (the literal expanded script), `<name>.log`
@@ -143,10 +144,16 @@ Other calibration facts read from `src/config.json`:
 | `CLOCK_PERIOD` | 20 ns (50 MHz) |
 | `FP_SIZING` | `absolute` |
 
-### 1.2 Hardened template — COMPLETE
+### 1.2 Hardened template at 1x1 — COMPLETE
+
+**This run is at `tiles: "1x1"`, the template default — not 6x4.** That is what
+the stock template ships with, and it is what the numbers in this subsection
+measure. The 6x4 geometry is established separately in §1.3.
 
 The unmodified template was hardened end to end through LibreLane (all 79
-flow stages, synthesis → GDS streamout). From `runs/wokwi/final/metrics.json`:
+flow stages, synthesis → GDS streamout) with `DIE_AREA [0, 0, 202.08, 154.98]`
+and `FP_DEF_TEMPLATE tt_block_1x1_pgvdd.def` (both read back from
+`runs/wokwi/resolved.json`). From `runs/wokwi/final/metrics.json`:
 
 | metric | value |
 |---|---|
@@ -171,17 +178,8 @@ by `LEFT/RIGHT_MARGIN_MULT 6` x site width 0.48 = **2.88 µm** on each side and
 (202.08 - 2x2.88) x (154.98 - 2x3.78) = 196.32 x 147.42 = 28,941.5 µm²
 ```
 
-which matches `design__core__area` exactly. Because the inset is a fixed number
-of microns rather than a percentage, **the core fraction improves with die
-size** — 92.41% at 1x1 but **98.49% at 6x4**:
-
-| tiles | die µm² | core µm² | core/die |
-|---|---|---|---|
-| 1x1 | 31,318.4 | 28,941.5 | 92.41% |
-| **6x4** | 916,213.9 | **902,417.2** | 98.49% |
-| 8x4 *(inferred die, §1.1)* | 1,225,257.1 | 1,208,172.7 | 98.61% |
-
-§7 uses the **core** areas, which is the right basis for placing standard cells.
+which matches `design__core__area` exactly — **at 1x1**. Whether that inset
+still holds at 6x4 is not something this run can answer; see §1.3.
 
 > The template's own 2.19% utilization is **not** a density target — it is a
 > 69-cell example design sitting in a whole tile. The number to carry forward
@@ -225,6 +223,84 @@ NP_LOCATION=~/eda NP_RUNTIME=bwrap ~/eda/nix-portable nix \
   'PDK_ROOT=~/pdk PDK=ihp-sg13cmos5l PATH=$PWD/.shim:$PATH \
    .venv-tt3/bin/python tt/tt_tool.py --harden --ihp --no-docker'
 ```
+
+### 1.3 6x4 geometry — MEASURED
+
+The §1.2 run was 1x1, so it cannot by itself justify a 6x4 core area. This
+subsection establishes 6x4 directly.
+
+**6x4 is accepted by the flow.** The `info.yaml` comment listing valid values
+as "1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2" is **stale**: the actual validation in
+`tt/project_info.py` is `tiles not in tile_sizes.keys()`, i.e. anything present
+in `tile_sizes.yaml` — which includes `6x4`. Setting `tiles: "6x4"` and
+re-running `tt_tool.py --create-user-config --ihp` produces:
+
+```json
+"DIE_AREA": "0 0 1289.28 710.64",
+"FP_DEF_TEMPLATE": "dir::../tt/tech/ihp-sg13cmos5l/def/tt_block_6x4_pgvdd.def"
+```
+
+**The core area comes from the floorplan template itself.** `FP_DEF_TEMPLATE`
+is not advisory — it is the DEF the flow loads, and its `ROW` statements define
+exactly where standard cells may be placed. Reading both templates:
+
+| | `tt_block_1x1_pgvdd.def` | `tt_block_6x4_pgvdd.def` |
+|---|---|---|
+| `DIEAREA` | 202.08 x 154.98 | 1289.28 x 710.64 |
+| row origin | (2.88, 3.78) | **(2.88, 3.78)** — identical |
+| sites per row | 409 | 2674 |
+| row count | 39 | 186 |
+| core width | 409 x 0.48 = 196.32 | 2674 x 0.48 = **1283.52** |
+| core height | 39 x 3.78 = 147.42 | 186 x 3.78 = **703.08** |
+| **core area** | 196.32 x 147.42 = **28,941.49** | 1283.52 x 703.08 = **902,417.24** |
+
+The 1x1 column is the control: that same computation reproduces
+`design__core__area` = 28,941.5 from the hardened run **to the decimal**, which
+is what licenses reading the 6x4 column the same way.
+
+So the margins really are absolute and unchanged at 6x4 — 2.88 µm horizontally
+and 3.78 µm vertically per side — and the core fraction rises with die size
+purely because the inset is fixed:
+
+| tiles | die µm² | core µm² | core/die |
+|---|---|---|---|
+| 1x1 | 31,318.4 | 28,941.5 | 92.41% |
+| **6x4** | **916,213.9** | **902,417.2** | **98.49%** |
+
+§7 budgets against the 6x4 **core**, 902,417 µm².
+
+#### Confirmed by hardening at 6x4
+
+The template was then re-hardened with `tiles: "6x4"` — all 79 stages, exit 0.
+From `runs/wokwi/final/metrics.json`:
+
+| metric | measured | predicted above | |
+|---|---|---|---|
+| `design__die__area` | **916,214** | 1289.28 x 710.64 = 916,213.9 | ✓ |
+| `design__core__area` | **902,417** | 1283.52 x 703.08 = 902,417.2 | ✓ |
+| `design__instance__area__stdcell` | 633.226 | (same 69-cell design) | — |
+| `design__instance__utilization` | 0.000701699 | — | — |
+| `magic__drc_error__count` | 0 | — | — |
+| `timing__hold__tns`, `design__power_grid_violation__count` | 0, 0 | — | — |
+
+So 902,417 µm² is a **measured** core area, not an extrapolation, and the 6x4
+floorplan is DRC-clean. The 0.07% utilization is meaningless on its own — it is
+the same 69-cell example design dropped into a die 29x larger, and the flow
+filled the rest with 71,032 fill cells covering 901,784 µm² of the 902,417 µm²
+core. That is exactly why §7 budgets against the core area and a density target
+rather than against this utilization.
+
+> Runtime note: the 6x4 flow took ~19 minutes against ~1 minute for 1x1, almost
+> all of it in `62-magic-drc`. Worth knowing before hardening the real design.
+
+> **8x4 does not exist for cmos5l.** The DEF directory contains 1x1, 1x2, 2x2,
+> 3x2, 3x4, 4x2, 4x4, 5x4, 6x2, 6x4 and 8x2 — **there is no
+> `tt_block_8x4_pgvdd.def`**, and no 8x4 key in `tile_sizes.yaml`. An 8x4
+> submission cannot be hardened with the stock support-tools at all; it needs
+> the custom branch prism uses (`kdp1965/tt-support-tools`, `cmos-8x4`).
+> Every 8x4 number in this report is therefore **extrapolated from the tile
+> pitch, not produced by any flow**, and is labelled as such. Treat 6x4 as the
+> only figure with evidence behind it.
 
 ## 2. Per-block breakdown, hierarchy preserved
 
@@ -481,19 +557,92 @@ the imem.
 
 ### How many SMs fit
 
-Using per-SM 76,401.36 µm² and 859.99 µm² shared, against the **core** areas
-derived from the hardened template in §1.2 (core, not die — the die includes
-the margins that no standard cell can use):
+The earlier version of this section divided the whole core area by a whole-SM
+figure and subtracted only the shared palette. That is a ceiling, not a budget:
+it ignored the shared host buffering, the CRC and stuffer, the pin-assignment
+logic and the chip-level glue. The number below comes instead from
+**synthesising a real multi-SM top at NSM = 1..5 and fitting a line.**
 
-| die | core µm² | density | usable µm² | **SMs** |
+`make area-chip` builds `stt_chip` — NSM state machines plus everything they
+share, at the actual Tiny Tapeout boundary (`ui_in`/`uo_out`/`uio_*`):
+
+| NSM | cells | flops | µm² | delta |
 |---|---|---|---|---|
-| 6x4 | 902,417 | 50% | 451,209 | **5.89** |
-| 6x4 | 902,417 | 60% (TT default) | 541,450 | **7.08** |
-| 8x4 *(inferred die, §1.1)* | 1,208,173 | 50% | 604,086 | **7.90** |
-| 8x4 *(inferred die, §1.1)* | 1,208,173 | 60% (TT default) | 724,904 | **9.48** |
+| 1 | 4284 | 1151 | 96,180.97 | — |
+| 2 | 7614 | 2103 | 174,463.29 | 78,282.32 |
+| 3 | 11029 | 3055 | 254,340.17 | 79,876.88 |
+| 4 | 14511 | 3989 | 332,417.40 | 78,077.23 |
+| 5 | 18039 | 4925 | 412,005.52 | 79,588.12 |
 
-**Going 6x4 → 8x4 adds about two more SMs** (+2.01 at 50%, +2.40 at 60%).
+Least squares over those five points:
 
+> **area(N) = 17,000.51 + N x 78,960.32 µm²**   (R² = 0.999989, |residual| < 460 µm²)
+
+**Solving against the measured 6x4 core area of 902,417 µm² (§1.3):**
+
+| N | area µm² | % of 6x4 core | verdict |
+|---|---|---|---|
+| 3 | 253,881 | 28.1% | fits |
+| 4 | 332,842 | 36.9% | fits |
+| **5** | **411,802** | **45.6%** | **fits — and N=5 is measured, not extrapolated** |
+| **6** | **490,762** | **54.4%** | **fits within TT's default 60% density** |
+| 7 | 569,723 | 63.1% | needs >60% density; tight |
+| 8 | 648,683 | 71.9% | does not fit |
+
+**The planning number is 6 SMs**, with 5 being the largest value actually
+synthesised (`chip5` = 412,005.52 µm², 45.7% of the core). 7 is not impossible
+but it requires exceeding `PL_TARGET_DENSITY_PCT` 60, which is TT's own default
+and the slack that routing and the clock tree live in.
+
+Inverting it the other way — SMs available at a given density:
+
+| density | usable µm² | N |
+|---|---|---|
+| 50% | 451,209 | **5** (5.50) |
+| 60% (TT default) | 541,450 | **6** (6.64) |
+| 70% | 631,692 | 7 (7.78) |
+
+#### What is in FIXED and what replicates
+
+From the hierarchical run `chip3_hier` (NSM=3), local areas per module:
+
+| shared, instantiated once | µm² |
+|---|---|
+| `stt_iomux` (pin assignment) | 7,982.15 |
+| `stt_fifo` x2 (shared TX + RX) | 11,747.64 |
+| `crc_lfsr16` | 3,350.59 |
+| `stt_chip` top glue | 1,440.63 |
+| `stt_hostbuf` arbiter (excl. FIFOs) | 1,088.45 |
+| `bit_stuffer` | 1,079.57 |
+| `stt_palette_fixed` (shared ROM) | 379.17 |
+| **total at NSM=3** | **27,068.20** |
+
+| replicated per SM | µm² |
+|---|---|
+| `stt_imem` | 56,580.14 |
+| `stt_palette_load` | 7,785.44 |
+| `stt_datapath` | 6,964.73 |
+| `stt_config` | 4,363.63 |
+| `stt_decode` | 1,150.25 |
+| `stt_palette` (entry mux + group decode) | 480.82 |
+| **total** | **77,325.01** |
+
+The fitted FIXED (17,000.51) is *smaller* than the 27,068.20 of
+once-instantiated blocks, and the fitted PER_SM (78,960.32) is *larger* than the
+77,325.01 of replicated blocks. That is not an inconsistency: **`stt_iomux` and
+the `stt_hostbuf` arbiter are shared but grow with N** — the per-pin driver mux
+is NSM*NSLOT wide and the round-robin arbiter is NSM wide — so the regression
+correctly charges their slope to the per-SM term and leaves only their intercept
+in FIXED. Per-SM glue is 78,960.32 − 77,261.35 = **1,698.97 µm²** over a
+standalone `stt_core`.
+
+> **A measurement trap worth recording.** In the first version of `stt_chip`
+> every SM shared one serial load chain, so all NSM instances held identical
+> state and Yosys merged them after `flatten`: the per-SM slope came out at 754
+> flops instead of 934, understating per-SM area by ~2,559 µm². The fix is
+> `uio_in[7:5]` selecting which SM is being programmed, which is what a real
+> host would do anyway. **If you extend this sweep, check the flop slope against
+> the standalone block before trusting the area slope.**
 > **One remaining bias, and it is in the optimistic direction.** `stat` area
 > excludes the clock tree, fill and tap cells, and all routing (§0). The
 > hardened template shows how large that gap can be: 69 standard cells of
@@ -503,11 +652,10 @@ the margins that no standard cell can use):
 > per-SM number here.
 >
 > The density column is doing that work: at `PL_TARGET_DENSITY_PCT` 60 there is
-> 40% slack for routing, CTS buffers and fill. That is TT's own default and the
-> reason to prefer the 60% row. Treat **6 SMs at 6x4 and 8 at 8x4** as the
-> planning number, and the 60% rows as the optimistic case.
+> 40% slack for routing, CTS buffers and fill. That is TT's own default, which
+> is why **6** is the planning number and 7 is not claimed.
 
-Reproduce: `python3 scripts/summarize_area.py build --tile-um2 902417 --density 0.6`
+Reproduce: `make area-chip && python3 scripts/summarize_area.py build --density 0.6`
 
 ---
 
@@ -515,9 +663,13 @@ Reproduce: `python3 scripts/summarize_area.py build --tile-um2 902417 --density 
 
 1. **The imem is the whole ballgame** — 73% of an SM. On the best cmos5l
    measurement available, a DFFRAM latch array is worth ~2.5x on those bits
-   (§5.4). Applied to the whole imem that is roughly **6 SMs → 9** at 6x4/60%,
-   which is the single largest lever in this study. Decide it before freezing
-   the row width, because it changes what a row bit costs.
+   (§5.4). The imem is 56,580 of the 77,325 µm² that replicates per SM (§7), so
+   cutting it ~2.5x takes PER_SM from 78,960 to roughly 45,000 — which at 60%
+   density moves the budget from **6 SMs to about 11** (6.64 → 11.61). That is
+   the single largest lever in this study — decide it before freezing the row
+   width. It is a *projection*: the 2.49x is measured at the macro's own 16x32
+   geometry (§5.2), not at ours, and §9 shows a 21-bit row only gets 1.63x
+   unless the row widens to 32.
 2. **Row width is expensive at 32 rows.** A measured **2,617.72 µm² per row
    bit** (§5.1b) — 2.42x the whole bit stuffer. Conversely the 16-bit CRC unit
    costs only 1.28 row bits, so it pays for itself if it saves two.

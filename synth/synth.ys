@@ -9,11 +9,13 @@
 # Markers:
 #   @SOURCES@   space-separated Verilog sources
 #   @TOP@       top module
+#   @PRE@       optional commands to run before `hierarchy` (e.g. chparam -set)
 #   @CHPARAM@   optional `-chparam NAME VALUE` pairs for the hierarchy pass
 #   @FLATTEN@   `flatten` for the true total, empty to preserve hierarchy
 #   @LIB@       absolute path to the typical-corner cmos5l liberty
 
 read_verilog -sv -I@RTL@ @SOURCES@
+@PRE@
 hierarchy -check -top @TOP@ @CHPARAM@
 proc; opt
 @FLATTEN@

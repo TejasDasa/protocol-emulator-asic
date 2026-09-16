@@ -88,13 +88,20 @@ endmodule
 
 // ------------------------------------------------------------------- palette
 module stt_palette #(
-    parameter ENTRY_W = 13,
-    parameter NFIXED  = 24,
-    parameter NLOAD   = 8
+    parameter ENTRY_W   = 13,
+    parameter NFIXED    = 24,
+    parameter NLOAD     = 8,
+    // EXT_FIXED=1 removes the 24-entry constant ROM from this instance and
+    // takes the looked-up entry from fixed_entry_i instead, so one ROM can be
+    // shared by several state machines. Default 0 keeps the original
+    // self-contained behaviour, so every earlier measurement reproduces.
+    parameter EXT_FIXED = 0
 ) (
     input  wire       clk,
     input  wire       rst_n,
     input  wire [4:0] index,
+    input  wire [ENTRY_W-1:0] fixed_entry_i,   // used only when EXT_FIXED=1
+    output wire [4:0]         index_o,         // index out to the shared ROM
     input  wire       ld_en,
     input  wire       ld_in,
     output wire       ld_out,
@@ -124,10 +131,18 @@ module stt_palette #(
   wire [ENTRY_W-1:0] e_fixed;
   wire [ENTRY_W-1:0] e_load;
 
-  stt_palette_fixed #(.ENTRY_W(ENTRY_W)) u_fixed (
-      .index (index),
-      .entry (e_fixed)
-  );
+  assign index_o = index;
+
+  generate
+    if (EXT_FIXED != 0) begin : g_ext_fixed
+      assign e_fixed = fixed_entry_i;
+    end else begin : g_own_fixed
+      stt_palette_fixed #(.ENTRY_W(ENTRY_W)) u_fixed (
+          .index (index),
+          .entry (e_fixed)
+      );
+    end
+  endgenerate
 
   stt_palette_load #(.ENTRY_W(ENTRY_W), .NLOAD(NLOAD)) u_load (
       .clk    (clk),

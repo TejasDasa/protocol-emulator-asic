@@ -16,7 +16,9 @@ module stt_core #(
     parameter CNT_W   = 8,
     parameter TIMER_W = 16,
     parameter NSLOT   = 3,
-    parameter NIN     = 2
+    parameter NIN     = 2,
+    // see stt_palette: 1 = take the 24 fixed entries from a shared ROM
+    parameter EXT_FIXED = 0
 ) (
     input  wire               clk,
     input  wire               rst_n,
@@ -43,6 +45,10 @@ module stt_core #(
     input  wire [NIN-1:0]     pin_in,
     output wire [NSLOT-1:0]   pin_out,
     output wire [NSLOT-1:0]   pin_oe,
+
+    // shared fixed palette (EXT_FIXED=1)
+    input  wire [ENTRY_W-1:0] fixed_entry_i,
+    output wire [4:0]         pal_index_o,
 
     // observability
     output wire [ADDR_W-1:0]  row_addr
@@ -98,10 +104,13 @@ module stt_core #(
   );
 
   // ---- action-set palette ----------------------------------------------
-  stt_palette #(.ENTRY_W(ENTRY_W), .NFIXED(NFIXED), .NLOAD(NLOAD)) u_palette (
+  stt_palette #(.ENTRY_W(ENTRY_W), .NFIXED(NFIXED), .NLOAD(NLOAD),
+                .EXT_FIXED(EXT_FIXED)) u_palette (
       .clk         (clk),
       .rst_n       (rst_n),
       .index       (act_index),
+      .fixed_entry_i (fixed_entry_i),
+      .index_o     (pal_index_o),
       .ld_en       (pal_ld_en),
       .ld_in       (ld_in),
       .ld_out      (pal_ld_out),
