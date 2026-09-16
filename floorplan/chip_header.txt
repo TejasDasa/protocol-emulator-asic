@@ -1,0 +1,22 @@
+// stt_chip_cfgmem -- NSM state machines with the row array in tiled
+// CFGMEM_IHP16 macros, at the real Tiny Tapeout boundary.
+//
+// Generated from rtl/stt_chip.v by floorplan/Makefile: identical except that
+// each state machine is an stt_core_cfgmem (macro imem) rather than an
+// stt_core (flop imem). The two are port-compatible.
+//
+// WHAT THIS IS AND IS NOT. This is configuration C, the 21-bit row with the
+// palette -- the format the RTL in rtl/ implements. The frozen format is D and
+// no D RTL exists (docs/SPEC.md section 16.2). For the floorplan question the
+// substitution is conservative in the direction that matters:
+//
+//   * the imem is 2 CFGMEM_IHP16 macros per state machine either way. C stores
+//     21 x 32 = 672 bits and D stores 32 x 32 = 1024 bits, and one macro holds
+//     512, so both need exactly 2. Macro count, geometry and PDN are identical.
+//   * C's per-SM soft logic is LARGER than D's -- that is why D fits 9 state
+//     machines and C fits 8 (docs/row-format-decision.md section 2). So a C
+//     floorplan that places and meets timing at 6 SMs is a lower bound on D.
+//
+// What it does NOT answer: D's specific critical paths. The palette lookup C
+// has and D does not, and the inline 13-bit action decode D has and C does not,
+// are different logic. Timing here bounds the area question, not D's own STA.
