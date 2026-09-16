@@ -52,7 +52,7 @@ used anywhere in this document:
 
 | term | meaning |
 |---|---|
-| **row** | One 32-bit instruction word, and the unit of execution. One row is evaluated per core clock cycle. |
+| **row** | One 32-bit program word, and the unit of execution. One row is evaluated per core clock cycle. |
 | **state machine** | One independent instance of the programmable engine, with its own imem, registers and pins. Abbreviated **SM** only in tables. |
 | **imem** | The instruction memory of one state machine: 32 rows, held in two **tile**s. |
 | **tile** | One `CFGMEM_IHP16` macro: 16 words of 32 bits. Two tiles make one imem. |
@@ -61,7 +61,8 @@ used anywhere in this document:
 | **host** | Whatever drives the chip's pins to load programs and exchange bytes. Off-chip. |
 | **core clock cycle** | One period of the chip's single clock input. The unit of all timing in §8. |
 
-Terms deliberately **not** used: *instruction* (say row), *opcode* (say test
+Terms deliberately **not** used: *instruction* for a row (say row; "instruction
+memory" remains the expansion of **imem**), *opcode* (say test
 code or action group), *word* (say row or tile word), *core* (say state
 machine), *palette* (it does not exist — see §6).
 
@@ -76,7 +77,7 @@ machine), *palette* (it does not exist — see §6).
 
 | state    | width       | reset                | scope  | description                                                                |
 |----------|-------------|----------------------|--------|----------------------------------------------------------------------------|
-| `row`    | 8           | 0                    | per-SM | Row pointer. Indexes the instruction memory.                               |
+| `row`    | 8           | 0                    | per-SM | Row pointer. Indexes the imem.                                             |
 | `link`   | 8           | 0                    | per-SM | Link register, written by the call action, read by target 255.             |
 | `sr`     | 8           | 0                    | per-SM | Shift register.                                                            |
 | `cnt`    | 8           | 0                    | per-SM | Counter 1. Decrements wrap modulo 256.                                     |
@@ -661,3 +662,148 @@ ignores the write or flags an error is not violating anything stated here. See
 **Depth is quantised.** The tile is 16 words, so imem depth comes in multiples
 of 16. A program needing a 33rd row does not cost one more row, it costs a third
 and fourth tile. The consequences are in `row-format-decision.md` §5.2 and §5.4.
+
+---
+---
+
+# Informative sections
+
+**Nothing below this line is normative.** §13–§15 record what is currently true
+and how to check it; §16 records what this specification does not settle. An
+implementation is judged against §1–§12.
+
+---
+
+## 13. Reference programs (informative)
+
+Six programs encode and pass against the device models at the frozen row format.
+Measured with `Format("single5", "grouped", tgt_bits=8)` and re-run through the
+models on the **decoded** rows, so the encoding is proven lossless:
+
+| program | rows | program bits | cycles/bit | result |
+|---|---|---|---|---|
+| UART TX | 5 | 160 | 2 | PASS |
+| UART RX | 8 | 256 | 3 | PASS |
+| SPI mode 0 | 8 | 256 | 6.525 | PASS |
+| I²C master | 22 | 704 | 5.875 | PASS |
+| USB LS token TX | 16 | 512 | 5 | PASS |
+| JTAG TAP | 25 | 800 | — | PASS |
+| **total** | | **2688** | | |
+
+**The worst case is JTAG at 25 rows of 32.** The binding resource is rows, and
+what consumes them is the single-pin-write rule of §7: a TAP walk must move TMS,
+TDI and TCK, and each costs a row. Bit-loop protocols are cheap in rows;
+state-machine protocols are not.
+
+Reproduce with `cd isa_bench && python3 widthsweep.py` and
+`python3 jtag_bench.py`.
+
+---
+
+## 14. Implementation constraints (informative)
+
+These are properties of the target process and flow, not of the ISA. They are
+recorded because they constrain any implementation of §12. Full detail is in
+`pdn_test/README.md` and `row-format-decision.md` §5.4.
+
+**Macro placement is quantised.** A `CFGMEM_IHP16` tile carries its power on
+**Metal4**, the same layer as the Tiny Tapeout PDN's only stripes, and pdngen
+trims its stripes around macros. A tile's power pins are reached only by a
+stripe running over them, so tile placement must land on the stripe grid:
+
+| parameter | value | why |
+|---|---|---|
+| `FP_PDN_VPITCH` | 44.96 | the tile's own VPWR column pitch |
+| `FP_PDN_VSPACING` | 3.52 | tile VPWR→VGND centres are 5.62 µm apart, minus the 2.1 µm stripe width |
+| tile x origin | on the 44.96 µm grid | so pin columns coincide with stripes |
+
+**The PDN needs a non-default flow.** An `ExtendPowerStripes`-style step must run
+after `OpenROAD.GeneratePDN` to draw stripes back across the pin columns, and
+`PDN_MACRO_CONNECTIONS` must **not** be set — it makes pdngen build a per-macro
+grid that is necessarily empty at that point and fails hard. With the recipe in
+`pdn_test/`, one state machine with two tiles hardens with zero power-grid
+violations, zero DRC errors and LVS reporting "Circuits match uniquely".
+
+**Target clock.** The Tiny Tapeout template sets `CLOCK_PERIOD` to 20 ns, i.e.
+**50 MHz**. **Fmax is not verified**: no STA has been run on this design at any
+frequency. 50 MHz is the target, not a result.
+
+---
+
+## 15. Conformance (informative)
+
+An implementation is considered correct when it passes all of:
+
+| check | command | current result |
+|---|---|---|
+| Encoding matches the models | `python3 spec/conformance.py` | 55/55 entries |
+| Document matches its source | `python3 spec/gen_spec.py --check` | 10/10 blocks |
+| All reference programs | `cd isa_bench && python3 bench.py` | 15 runs PASS, 0 FAIL |
+| JTAG | `cd isa_bench && python3 jtag_bench.py` | PASS, 25 rows |
+| Mutation score ≥ 85% | `cd isa_bench && python3 mutate.py --gate` | 89.1% (312/350) |
+
+**The mutation floor is the important one.** A benchmark suite that cannot fail
+proves nothing, so `mutate.py` corrupts each program one point at a time — wrong
+test code, wrong branch mode, shifted target, dropped or added action, wrong pin
+op or slot — and requires the benchmarks to catch them. The gate also fails if
+the mutant *count* drops, which catches a benchmark being removed (that would
+raise the percentage while testing less).
+
+**Timing assertions are part of conformance.** UART TX and USB require zero
+jitter; SPI and I²C require every clock phase to last at least its nominal
+minus a stated tolerance. These were added after the suite revealed that SPI and
+I²C had never checked bit timing at all.
+
+Row-order mutants are reported separately and excluded from the score: branch
+targets resolve by name, so most adjacent swaps produce a semantically identical
+program.
+
+---
+
+## 16. Open items and known limits (informative)
+
+Everything this specification does not settle. Each entry says what is missing
+and where the evidence stops.
+
+### 16.1 Not specified — an implementation must choose, and record its choice
+
+| item | what is missing | where |
+|---|---|---|
+| **Timer width** | `tcount` is an unbounded integer in the models. The structural RTL uses 16 bits. Must cover the required reload period `P`. | §2, §8.4 |
+| **FIFO depth** | The models use unbounded queues. No depth, and no behaviour for `push` onto a full RX FIFO. | §2, §9 |
+| **`load` from an empty TX FIFO** | The model raises an error; hardware behaviour is undefined. | §9 |
+| **`next` from the last row** | The encoder wraps to row 0 using the program length, which hardware does not know. No reference program exercises it — all six end on a `WAIT` row. | §5 |
+| **`d0`/`d1` on a single slot** | Defined only for the pair slot. On a single slot the model writes nothing, as a side effect of its structure. | §7 |
+| **Test codes 10–15, pin op code 7** | Unassigned. The models would raise on decode. | §4, §7 |
+| **A 33rd row in hardware** | The toolchain rejects it. The structural RTL's 5-bit write pointer wraps and overwrites row 0. | §12 |
+| **Run/halt and live reprogramming** | Whether a state machine may be reprogrammed while running, and its state on the first cycle after a reload. | §10 |
+| **Power-up before the first clock edge** | Output pin state between power-up and reset is not modelled. | §11 |
+
+### 16.2 Specified but unverified
+
+| item | status |
+|---|---|
+| **Static timing analysis** | Never run, at any frequency. 50 MHz is a target. This is the largest verification gap. |
+| **Inter-pin skew** | The model has no pin path. Skew between a clock and its data — SCK/MOSI, SCL/SDA — is the failure mode that matters in silicon and is entirely unmeasured. |
+| **Multi-state-machine floorplan** | Single-machine integration is demonstrated and LVS-clean. Several machines with their tiles on the placement grid, each machine's logic near its own tiles, is untested. |
+| **The structural RTL** | `rtl/` was written to measure area. It implements the *previous* row format (21-bit, 5-bit target, palette) and has never passed a functional test. It is not an implementation of this specification. |
+
+### 16.3 Reachable but unexercised
+
+| item | status |
+|---|---|
+| **The wider shared units** | `crc_lfsr16`, `bit_stuffer`, `hostbuf`, `iomux` exist in RTL and were priced, but no row field reaches them and no benchmark uses them (§9). |
+| **The 32-row ceiling** | JTAG sits at 25 of 32. The next row costs a third and fourth tile, not one row (§12). No protocol has been written that exceeds 32. |
+| **CAN** | A device model exists (`isa_bench/jtag_can.py`); no program was written. The obstacle is recorded: there is no "same as the previous bit" test, so in-loop run detection for bit stuffing needs duplicated paths. |
+| **I²C START/STOP timing** | Six timer mutants survive. They change pin timing but never below the bit-period minimum, because those rows govern setup and hold intervals that I²C specifies separately (`t_SU;STA`, `t_HD;STA`, `t_SU;STO`) and the benchmark does not check. |
+| **`fixed_entry_i[*]`** | `stt_core` carries an external-palette input used only when `EXT_FIXED=1`. With the palette gone it is dead, and it appears as 13 disconnected pins in a hardened design. A real multi-machine top must not expose it. |
+
+### 16.4 How this document can go wrong
+
+The encoding tables cannot drift: they are generated from `spec/isa.json`, which
+is checked against the models (§0). The **prose** has no such guard. One prose
+assertion in this repository was carried for weeks with no code behind it and
+propagated into planning before anyone checked — the history is in
+`area-study.md` §8. Treat an unmarked prose claim here the same way: if it is
+not marked **SPECIFIED** with a trace, or **CURRENT BEHAVIOUR**, it has not been
+checked.

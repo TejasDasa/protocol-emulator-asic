@@ -102,7 +102,7 @@
                    "cload", "cload_b", "cload_c", "cdec", "c2load", "c2dec", "trst", "thalf", "call"],
 
   "state": [
-    {"name": "row",    "width": 8,  "reset": "0",   "scope": "per-SM", "description": "Row pointer. Indexes the instruction memory."},
+    {"name": "row",    "width": 8,  "reset": "0",   "scope": "per-SM", "description": "Row pointer. Indexes the imem."},
     {"name": "link",   "width": 8,  "reset": "0",   "scope": "per-SM", "description": "Link register, written by the call action, read by target 255."},
     {"name": "sr",     "width": 8,  "reset": "0",   "scope": "per-SM", "description": "Shift register."},
     {"name": "cnt",    "width": 8,  "reset": "0",   "scope": "per-SM", "description": "Counter 1. Decrements wrap modulo 256."},
