@@ -184,6 +184,7 @@ spec:
 	@python3 spec/conformance.py
 
 check: spec-check
+	@$(MAKE) --no-print-directory check-freeze
 	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
 	@for r in $(COMB_RUNS); do \
 	   test -f $(BUILD)/$$r.log && python3 scripts/check_area.py $(BUILD)/$$r.log --comb-ok || true; \
@@ -198,3 +199,13 @@ check-mutation:
 
 clean:
 	rm -rf $(BUILD)
+
+# The freeze is a claim about encodings, so it gets a gate. sharedunits.py
+# re-encodes every reference program with and without the reserved-code
+# amendment and fails if a single packed word moves; nextrow.py fails if a
+# program starts taking `next` from its own last row, where the model wraps at
+# the program length and the RTL wraps at 32.
+.PHONY: check-freeze
+check-freeze:
+	@cd isa_bench && python3 sharedunits.py >/dev/null && echo "OK: freeze intact (reserved codes fit, all benchmarks bit-identical)"
+	@cd isa_bench && python3 nextrow.py | tail -1

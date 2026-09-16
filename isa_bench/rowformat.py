@@ -133,7 +133,8 @@ class Format:
             pal_bits = (len(pal) - 1) * self.entry_width()
         row_w = sum(widths)
         return dict(bits=len(packed) * row_w + pal_bits, row_width=row_w,
-                    palette_bits=pal_bits, missing=0, decoded=dec, rows=len(packed))
+                    palette_bits=pal_bits, missing=0, decoded=dec, rows=len(packed),
+                    packed=packed)
 
 
 # ------------------------------------------------------------------ split fallback

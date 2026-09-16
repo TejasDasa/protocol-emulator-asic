@@ -2,6 +2,35 @@
   "_source_of_truth": "This file is the single machine-readable source for every encoding table in docs/SPEC.md. The Markdown tables are GENERATED from it by spec/gen_spec.py; do not edit them in the document. spec/conformance.py checks this file field-by-field against the authoritative Python models in isa_bench/, and `make spec-check` fails if either the document or the models drift from it.",
   "_authority": "Where the Python models in isa_bench/ and the structural RTL in rtl/ disagree, the Python models win: they are the versions that pass the benchmarks. As of the freeze they agree on every shared constant (verified by conformance.py).",
 
+  "_reserved_note": "Codes reserved by the shared-unit amendment (isa_bench/sharedunits.py). They are SPECIFIED in meaning but have NO implementation: no model in isa_bench/, no RTL, no benchmark. They are listed separately from the live tables above precisely so that spec/conformance.py does NOT expect the models to carry them. Adding them costs zero row bits and, being appended, leaves every existing code index unchanged -- verified by re-encoding every benchmark bit-identically.",
+
+  "reserved_codes": [
+    {"field": "act_xx", "code": 5, "name": "crc16rst",  "unit": "crc_lfsr16",
+     "meaning": "Seed the shared 16-bit CRC/LFSR from its configured seed value. Frame boundary."},
+    {"field": "act_xx", "code": 6, "name": "crc16step", "unit": "crc_lfsr16",
+     "meaning": "Advance the shared CRC by the shift register serial bit."},
+    {"field": "act_xx", "code": 7, "name": "stuffrst",  "unit": "bit_stuffer",
+     "meaning": "Flush the bit stuffer's run counter. Frame boundary."},
+    {"field": "pin_op", "code": 7, "name": "crcb",      "unit": "crc_lfsr16",
+     "meaning": "Drive the selected slot from the shared CRC serial bit, advancing the register. Replaces a slot write rather than competing with one."},
+    {"field": "test",   "code": 10, "name": "stall",    "unit": "bit_stuffer",
+     "meaning": "True while the stuffer is inserting a bit and not accepting one, so the program can hold the shift register."}
+  ],
+
+  "reserved_config": [
+    {"name": "crc16_poly",    "unit": "crc_lfsr16",  "maps_to": "poly_in/poly_we"},
+    {"name": "crc16_reflect", "unit": "crc_lfsr16",  "maps_to": "reflect_in/reflect_we"},
+    {"name": "crc16_seed",    "unit": "crc_lfsr16",  "maps_to": "seed_ones"},
+    {"name": "stuff_n",       "unit": "bit_stuffer", "maps_to": "n_in/n_we"},
+    {"name": "stuff_mode",    "unit": "bit_stuffer", "maps_to": "mode_insert_in/mode_ones_in/mode_we"},
+    {"name": "slot_stuff",    "unit": "bit_stuffer", "maps_to": "in_valid/in_bit: per-slot route bit, the slot's output passes through the stuffer"}
+  ],
+
+  "next_row_rule": {
+    "rule": "next = (row + 1) mod 32",
+    "note": "next from row 31 wraps to row 0. Taken from rtl/stt_decode.v:73, which needs no program-length register. isa_bench/rowenc.py:182 wraps at the end of the PROGRAM instead; the two differ only for a program shorter than 32 rows that takes next from its own last row, which no reference program does -- all six end on a WAIT row, whose exits are both explicit."
+  },
+
   "row_width": 32,
   "max_rows": 32,
   "ret_code": 255,
@@ -52,8 +81,8 @@
     {"code": 2, "name": "hi",   "single": "Drive 1.", "pair": "Drive (1,1)."},
     {"code": 3, "name": "sr",   "single": "Drive the shift register serial bit.", "pair": "Drive (srbit, NOT srbit)."},
     {"code": 4, "name": "tgl",  "single": "Invert the slot.", "pair": "Invert both slots."},
-    {"code": 5, "name": "d0",   "single": "UNSPECIFIED for a single slot (see SPEC section 16).", "pair": "Drive (0,1)."},
-    {"code": 6, "name": "d1",   "single": "UNSPECIFIED for a single slot (see SPEC section 16).", "pair": "Drive (1,0)."}
+    {"code": 5, "name": "d0",   "single": "No write; the slot holds. d0/d1 are pair-only ops and the encoder rejects them on a single slot.", "pair": "Drive (0,1)."},
+    {"code": 6, "name": "d1",   "single": "No write; the slot holds. d0/d1 are pair-only ops and the encoder rejects them on a single slot.", "pair": "Drive (1,0)."}
   ],
 
   "action_groups": [

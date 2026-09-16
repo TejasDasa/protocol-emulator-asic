@@ -1,0 +1,238 @@
+{
+ "control": [
+  [
+   "crc_lfsr16",
+   "poly_in/poly_we",
+   "config",
+   "polynomial is a per-program constant"
+  ],
+  [
+   "crc_lfsr16",
+   "reflect_in/reflect_we",
+   "config",
+   "bit order is a per-program constant"
+  ],
+  [
+   "crc_lfsr16",
+   "seed_ones",
+   "config",
+   "seed value is a per-program constant"
+  ],
+  [
+   "crc_lfsr16",
+   "seed",
+   "ROW",
+   "frame boundary: reset the register"
+  ],
+  [
+   "crc_lfsr16",
+   "en (as a step enable)",
+   "ROW",
+   "advance by one data bit, on the rows that carry data"
+  ],
+  [
+   "crc_lfsr16",
+   "data_bit",
+   "config",
+   "source is srbit, same as the per-SM CRC5"
+  ],
+  [
+   "crc_lfsr16",
+   "crc_bit (readback)",
+   "ROW",
+   "shift the residue out onto a pin"
+  ],
+  [
+   "bit_stuffer",
+   "n_in/n_we",
+   "config",
+   "run length is a per-program constant"
+  ],
+  [
+   "bit_stuffer",
+   "mode_insert/mode_ones",
+   "config",
+   "direction and counting rule are per-program constants"
+  ],
+  [
+   "bit_stuffer",
+   "flush",
+   "ROW",
+   "frame boundary: clear the run counter"
+  ],
+  [
+   "bit_stuffer",
+   "in_valid/in_bit",
+   "config",
+   "per-slot route bit: slot output passes through the stuffer"
+  ],
+  [
+   "bit_stuffer",
+   "in_ready (backpressure)",
+   "ROW",
+   "an insert stalls the producer for one bit; the program must see it"
+  ]
+ ],
+ "amendment": [
+  [
+   "act_xx",
+   "crc16rst",
+   "seed the shared CRC16 (frame boundary)"
+  ],
+  [
+   "act_xx",
+   "crc16step",
+   "advance the shared CRC16 by srbit"
+  ],
+  [
+   "act_xx",
+   "stuffrst",
+   "flush the bit stuffer's run counter (frame boundary)"
+  ],
+  [
+   "pin_op",
+   "crcb",
+   "drive the slot from the shared CRC16 serial bit, advancing it"
+  ],
+  [
+   "test",
+   "stall",
+   "true while the bit stuffer is inserting and not accepting a bit"
+  ]
+ ],
+ "free_before": [
+  {
+   "field": "test",
+   "bits": 4,
+   "used": 10,
+   "cap": 16,
+   "free": 6
+  },
+  {
+   "field": "mode",
+   "bits": 2,
+   "used": 4,
+   "cap": 4,
+   "free": 0
+  },
+  {
+   "field": "pin_slot",
+   "bits": 2,
+   "used": 4,
+   "cap": 4,
+   "free": 0
+  },
+  {
+   "field": "pin_op",
+   "bits": 3,
+   "used": 7,
+   "cap": 8,
+   "free": 1
+  },
+  {
+   "field": "act_sr",
+   "bits": 3,
+   "used": 8,
+   "cap": 8,
+   "free": 0
+  },
+  {
+   "field": "act_c1",
+   "bits": 3,
+   "used": 5,
+   "cap": 8,
+   "free": 3
+  },
+  {
+   "field": "act_c2",
+   "bits": 2,
+   "used": 3,
+   "cap": 4,
+   "free": 1
+  },
+  {
+   "field": "act_tm",
+   "bits": 2,
+   "used": 3,
+   "cap": 4,
+   "free": 1
+  },
+  {
+   "field": "act_xx",
+   "bits": 3,
+   "used": 5,
+   "cap": 8,
+   "free": 3
+  }
+ ],
+ "free_after": [
+  {
+   "field": "test",
+   "bits": 4,
+   "used": 11,
+   "cap": 16,
+   "free": 5
+  },
+  {
+   "field": "mode",
+   "bits": 2,
+   "used": 4,
+   "cap": 4,
+   "free": 0
+  },
+  {
+   "field": "pin_slot",
+   "bits": 2,
+   "used": 4,
+   "cap": 4,
+   "free": 0
+  },
+  {
+   "field": "pin_op",
+   "bits": 3,
+   "used": 8,
+   "cap": 8,
+   "free": 0
+  },
+  {
+   "field": "act_sr",
+   "bits": 3,
+   "used": 8,
+   "cap": 8,
+   "free": 0
+  },
+  {
+   "field": "act_c1",
+   "bits": 3,
+   "used": 5,
+   "cap": 8,
+   "free": 3
+  },
+  {
+   "field": "act_c2",
+   "bits": 2,
+   "used": 3,
+   "cap": 4,
+   "free": 1
+  },
+  {
+   "field": "act_tm",
+   "bits": 2,
+   "used": 3,
+   "cap": 4,
+   "free": 1
+  },
+  {
+   "field": "act_xx",
+   "bits": 3,
+   "used": 8,
+   "cap": 8,
+   "free": 0
+  }
+ ],
+ "row_widths": [
+  32
+ ],
+ "benchmarks_bit_identical": true,
+ "fields_overflowed": []
+}

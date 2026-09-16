@@ -78,6 +78,45 @@ def main():
                   f"group {name} code {code}: spec {spec_ch.get(code)} vs models {tuple(acts)}")
         off += w
 
+    # ---- toolchain rules the spec asserts, tested in both directions -----
+    # SPEC section 7: d0/d1 are pair-only; SttProgram rejects them on a single
+    # slot. A gate that has never been seen to fire is not a gate.
+    from stt import Row, SttProgram
+    try:
+        SttProgram([Row("A", "always", "A", "A", pins={"pair": "d0"})])
+        pair_ok = True
+    except ValueError:
+        pair_ok = False
+    check(pair_ok, "d0 on the pair slot must be accepted, but SttProgram rejected it")
+
+    for op in ("d0", "d1"):
+        try:
+            SttProgram([Row("A", "always", "A", "A", pins={0: op})])
+            check(False, f"{op} on a single slot must be rejected (SPEC section 7), "
+                         f"but SttProgram accepted it")
+        except ValueError as e:
+            check("pair-only" in str(e),
+                  f"{op} on a single slot was rejected for the wrong reason: {e}")
+
+    # SPEC section 9: the reserved codes are deliberately NOT in the live
+    # tables, so the models must not carry them.
+    from rowformat import PINOPS as _PO
+    from rowenc import TESTS as _T, GROUPS as _G
+    for r in spec.get("reserved_codes", []):
+        if r["field"] == "pin_op":
+            check(r["name"] not in _PO,
+                  f"reserved pin_op {r['name']!r} must not be in rowformat.PINOPS yet")
+        elif r["field"] == "test":
+            check(r["name"] not in _T,
+                  f"reserved test {r['name']!r} must not be in rowenc.TESTS yet")
+        elif r["field"].startswith("act_"):
+            g = dict(_G)[r["field"][4:]]
+            check(all(r["name"] not in c for c in g),
+                  f"reserved action {r['name']!r} must not be in GROUPS yet")
+        check(r["code"] >= {"pin_op": len(_PO), "test": len(_T)}.get(
+                  r["field"], len(dict(_G).get(r["field"][4:], []))),
+              f"reserved {r['field']} code {r['code']} collides with a live code")
+
     # ---- row field layout ------------------------------------------------
     # Rebuild the field list the way rowformat.Format does for the frozen row
     # (single5 pins, grouped actions, 8-bit target) and compare offsets.

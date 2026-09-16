@@ -120,6 +120,20 @@ def blocks(spec):
     b["action-order"] = ("Within a row, actions take effect in this fixed order:\n\n"
                          + " → ".join(f"`{a}`" for a in spec["action_order"]))
 
+    b["reserved-codes"] = table(
+        ["field", "code", "name", "unit", "meaning"],
+        [[f"`{r['field']}`", r["code"], f"`{r['name']}`", f"`{r['unit']}`", r["meaning"]]
+         for r in spec["reserved_codes"]]
+    ) + "\n\nand the configuration these codes rely on:\n\n" + table(
+        ["config item", "unit", "maps to"],
+        [[f"`{c['name']}`", f"`{c['unit']}`", f"`{c['maps_to']}`"]
+         for c in spec["reserved_config"]]
+    )
+
+    b["next-row-rule"] = (f"**`next` = `{spec['next_row_rule']['rule']}`.**\n\n"
+                          + spec["next_row_rule"]["note"])
+
+
     return b
 
 

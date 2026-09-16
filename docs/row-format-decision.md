@@ -278,6 +278,43 @@ bits when row bits are nearly free. The right question is capability against the
 Together 4,430.16 µm², 26.1% of the fixed budget, against 8-9 SMs of per-SM
 area. **Recommend keeping both.**
 
+### 6.1 The capability argument had no encoding path — it does now
+
+**2026-09-16.** The argument above justified 4,430.16 µm² of fixed budget on
+what the two units make possible, but at the time nothing in the row format
+reached them. In `rtl/stt_chip.v` their control inputs are tied to raw
+`ui_in`/`uio_in` bits so that the area harness's "every input driven" rule is
+satisfied; that is a measurement scaffold, not an architecture. Keeping them on
+capability grounds while no program could invoke them would have meant taping
+out logic no program can reach.
+
+Two of the four units named elsewhere in this document were never affected.
+`stt_hostbuf` is driven by `tx_pop`/`rx_push`/`tx_ne`, which are the `load` and
+`push` actions and the `fifo` test; `stt_iomux` is driven by `sm_out`/`sm_oe`/
+`sm_in`, which are every pin op and the `in0`/`in1` tests. Both are reached
+through fields that already exist. The per-SM CRC5 is also reachable and used:
+the USB program issues `crcrst` once, `loadcrc` once and `crcstep` three times.
+The gap was the two *wider* units only.
+
+`isa_bench/sharedunits.py` prices the fix. Of 12 control inputs across the two
+modules, **7 are per-program constants** the existing serial configuration chain
+carries and **5 need a row to say them**. All five fit in codes that were already
+free — `test` 10→11 of 16, `pin_op` 7→8 of 8, `act_xx` 5→8 of 8 — so the
+amendment **costs zero row bits**, and because every code is appended rather
+than inserted, no existing code index moves. That claim is checked rather than
+asserted: every reference program is re-encoded with and without the amendment
+and the packed words compared, all identical, all still 32 bits. `make
+check-freeze` fails if that stops being true.
+
+**The freeze on D survives intact.** The residual cost is mutual exclusion, not
+space: `act_xx` and `pin_op` are now full, so a row wanting `crc16step`
+alongside `call`, `crcrst` or `crcstep` must split into two. `act_xx` is already
+non-zero on 8 of 59 reference rows, all in USB. The codes are recorded in
+`spec/isa.json` under `reserved_codes` and specified in `docs/SPEC.md` §9; they
+have **no implementation** — no model, no RTL path, no benchmark — and are held
+outside the tables `spec/conformance.py` checks so that absence is not mistaken
+for drift. Implementing them is RTL-phase work.
+
 ---
 
 ## 7. What the measurements cannot settle
@@ -304,6 +341,12 @@ area. **Recommend keeping both.**
 6. **Whether the 13-bit grouping is right.** C and D share it. The 1.37%
    reachability of all action subsets is a design choice nobody has re-examined
    since it was set.
+7. **Whether the reserved codes are the right five.** §6.1 shows five codes
+   suffice and that they fit for free, which is what the freeze needed. It does
+   not show they are sufficient *in practice*: no program uses them, so the
+   split-row cost of `act_xx` being full is estimated from where existing rows
+   already spend that field (8 of 59, all USB), not measured on a program that
+   actually stuffs bits or runs a CRC-16.
 
 ---
 

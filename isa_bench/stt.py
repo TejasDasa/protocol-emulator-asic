@@ -51,9 +51,17 @@ class SttProgram:
                 raise ValueError(f"bad test {r.test}")
             if r.test not in TESTS_V1:
                 v = 2
-            for op in r.pins.values():
+            for slot, op in r.pins.items():
                 if op not in PINOPS_V2:
                     raise ValueError(f"bad pin op {op}")
+                # d0/d1 name the two halves of the D+/D- pair. On a single slot
+                # both the model and rtl/stt_datapath.v structurally write
+                # nothing (single_we stays 0). That is a specified no-op in
+                # hardware, but a program that asks for it has a bug, so the
+                # encoder refuses to express it. See docs/SPEC.md section 6.
+                if slot != "pair" and op in ("d0", "d1"):
+                    raise ValueError(
+                        f"pin op {op} on single slot {slot}: d0/d1 are pair-only")
                 if op not in PINOPS_V1:
                     v = 2
             if r.t == "ret":

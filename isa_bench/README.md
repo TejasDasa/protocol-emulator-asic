@@ -162,3 +162,27 @@ see:
 So the tolerance remains the right knob for asking "would this still work if the
 pin path cost us N cycles" — but the honest answer is that the model cannot
 answer it, because the model has no pin path. That question belongs to STA.
+
+## Shared-unit reachability and the freeze (`sharedunits.py`, `nextrow.py`)
+
+`crc_lfsr16` and `bit_stuffer` were priced into the fixed budget and argued for
+on capability grounds, but no row field reached them: in `rtl/stt_chip.v` their
+control inputs are tied to raw `ui_in`/`uio_in` bits to satisfy the area
+harness's "every input driven" rule. (`stt_hostbuf` and `stt_iomux` were never
+affected — they hang off `tx_pop`/`rx_push`/`tx_ne` and `sm_out`/`sm_oe`/`sm_in`,
+which are existing actions, tests and pin ops.)
+
+`python3 sharedunits.py` takes every control input from the two module port
+lists, splits them into per-program constants and things a row must say, places
+the latter in codes that are already free, and then **proves the freeze survives**
+by re-encoding every reference program with and without the amendment and
+comparing the packed words. Five codes, zero new row bits, every benchmark
+bit-identical. Writes `sharedunits.json`.
+
+`python3 nextrow.py` checks the one place the model and the RTL could disagree
+about `next`: `rowenc.rebuild` wraps at the end of the *program*,
+`stt_decode.v:73` wraps at row 31. It fails if any program starts taking `next`
+from its own last row. All six currently end on a `WAIT` row, so the two rules
+cannot be told apart.
+
+Both are wired into `make check-freeze`, which `make check` runs.
