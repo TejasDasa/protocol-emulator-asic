@@ -122,6 +122,9 @@ def main():
     ap.add_argument("logs", nargs="+")
     ap.add_argument("--name", default=None)
     ap.add_argument("--json", default=None)
+    ap.add_argument("--comb-ok", action="store_true",
+                    help="this design is legitimately combinational; do not "
+                         "require dfflibmap to have mapped any flops")
     args = ap.parse_args()
 
     logs = []
@@ -132,7 +135,16 @@ def main():
     for log in logs:
         name = args.name or log.split("/")[-1].rsplit(".", 1)[0]
         mods = parse(log)
-        ok, msgs, _, _ = verify(mods)
+        ok, msgs, nflops, nlatch = verify(mods)
+        if args.comb_ok and nflops == 0 and nlatch == 0:
+            # A purely combinational block has no flops to map. The flop check
+            # exists to catch dfflibmap silently failing on a sequential
+            # design, not to reject combinational ones.
+            ok = True
+            msgs = [m.replace("FAIL: dfflibmap mapped no flops -- no sg13cmos5l "
+                              "sequential cells found",
+                              "OK: no flops, and --comb-ok says that is expected")
+                    for m in msgs]
         all_ok &= ok
 
         print(f"[{name}]")

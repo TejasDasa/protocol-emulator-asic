@@ -62,6 +62,25 @@ define RUN
 	@python3 scripts/check_area.py $(BUILD)/$(1).log --name $(1) --json $(BUILD)/$(1).json
 endef
 
+# Same as RUN but for a design that is legitimately combinational, so the
+# "dfflibmap mapped no flops" check must not fire. Used only where the absence
+# of flops is the point (e.g. the palette with its action group inlined).
+define RUN_COMB
+	@mkdir -p $(BUILD)
+	@sed -e 's|@RTL@|$(RTL)|g' \
+	     -e 's|@SOURCES@|$(3)|g' \
+	     -e 's|@TOP@|$(2)|g' \
+	     -e 's|@CHPARAM@|$(4)|g' \
+	     -e 's|@PRE@|$(6)|g' \
+	     -e 's|@FLATTEN@|$(5)|g' \
+	     -e 's|@LIB@|$(LIB)|g' \
+	     synth/synth.ys > $(BUILD)/$(1).ys
+	@echo "=== $(1) ==="
+	@$(YOSYS) -q -l $(BUILD)/$(1).log -s $(BUILD)/$(1).ys 2>&1 | tail -20 || \
+	  { echo "YOSYS FAILED for $(1); see $(BUILD)/$(1).log"; exit 1; }
+	@python3 scripts/check_area.py $(BUILD)/$(1).log --name $(1) --comb-ok --json $(BUILD)/$(1).json
+endef
+
 area-core: lib-check
 	$(call RUN,core_hier,stt_core,$(CORE_SRCS),,)
 	$(call RUN,core_flat,stt_core,$(CORE_SRCS),,flatten -noscopeinfo)
@@ -97,6 +116,8 @@ area-roww: lib-check
 	$(call RUN,roww21,stt_imem,$(RTL)/stt_imem.v,-chparam ROWS 32 -chparam ADDR_W 5 -chparam ROW_W 21,flatten -noscopeinfo)
 	$(call RUN,roww22,stt_imem,$(RTL)/stt_imem.v,-chparam ROWS 32 -chparam ADDR_W 5 -chparam ROW_W 22,flatten -noscopeinfo)
 	$(call RUN,roww24,stt_imem,$(RTL)/stt_imem.v,-chparam ROWS 32 -chparam ADDR_W 5 -chparam ROW_W 24,flatten -noscopeinfo)
+	$(call RUN,roww29,stt_imem,$(RTL)/stt_imem.v,-chparam ROWS 32 -chparam ADDR_W 5 -chparam ROW_W 29,flatten -noscopeinfo)
+	$(call RUN,roww32,stt_imem,$(RTL)/stt_imem.v,-chparam ROWS 32 -chparam ADDR_W 5 -chparam ROW_W 32,flatten -noscopeinfo)
 
 # ---- multi-SM chip: fixed overhead + N x per-SM, at the real TT boundary.
 # Fitting a line through these gives a defensible SM count (docs 7).
@@ -133,12 +154,25 @@ area-cfgmem-width: lib-check
 	$(call RUN,cfgw29,stt_imem_cfgmem,$(CFGMEM_SRCS),,flatten -noscopeinfo,chparam -set NTILE 2 -set ROWS 32 -set ROW_W 29 stt_imem_cfgmem)
 	$(call RUN,cfgw32,stt_imem_cfgmem,$(CFGMEM_SRCS),,flatten -noscopeinfo,chparam -set NTILE 2 -set ROWS 32 -set ROW_W 32 stt_imem_cfgmem)
 
-area: area-core area-imem area-extras area-timer area-fifo area-roww area-chip area-cfgmem area-cfgmem-width
+# ---- palette variants: what survives when the 13-bit action group is inlined
+# into a 32-bit row (Part B) instead of looked up in a palette.
+area-palette: lib-check
+	$(call RUN,pal_lookup,stt_palette,$(RTL)/stt_palette.v,,flatten -noscopeinfo,chparam -set INLINE_ENTRY 0 stt_palette)
+	$(call RUN_COMB,pal_inline,stt_palette,$(RTL)/stt_palette.v,,flatten -noscopeinfo,chparam -set INLINE_ENTRY 1 stt_palette)
+
+area: area-core area-imem area-extras area-timer area-fifo area-roww area-chip area-cfgmem area-cfgmem-width area-palette
 	@python3 scripts/check_slope.py $(BUILD)
 	@python3 scripts/summarize_area.py $(BUILD)
 
+# COMB_RUNS are legitimately combinational: the "no flops" check must not fire.
+# Listed explicitly rather than pattern-matched, so adding one is a deliberate act.
+COMB_RUNS := pal_inline
+
 check:
-	@python3 scripts/check_area.py $(BUILD)/*.log
+	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
+	@for r in $(COMB_RUNS); do \
+	   test -f $(BUILD)/$$r.log && python3 scripts/check_area.py $(BUILD)/$$r.log --comb-ok || true; \
+	 done
 	@python3 scripts/check_slope.py $(BUILD)
 	@$(MAKE) --no-print-directory check-mutation
 

@@ -95,12 +95,17 @@ module stt_palette #(
     // takes the looked-up entry from fixed_entry_i instead, so one ROM can be
     // shared by several state machines. Default 0 keeps the original
     // self-contained behaviour, so every earlier measurement reproduces.
-    parameter EXT_FIXED = 0
+    parameter EXT_FIXED = 0,
+    // INLINE_ENTRY=1 is the 32-bit-row format: the 13-bit action group comes
+    // straight out of the row, so there is no palette at all -- no fixed ROM,
+    // no loadable bank, no 2:1 select. Only the group decode survives.
+    parameter INLINE_ENTRY = 0
 ) (
     input  wire       clk,
     input  wire       rst_n,
     input  wire [4:0] index,
     input  wire [ENTRY_W-1:0] fixed_entry_i,   // used only when EXT_FIXED=1
+    input  wire [ENTRY_W-1:0] inline_entry_i,  // used only when INLINE_ENTRY=1
     output wire [4:0]         index_o,         // index out to the shared ROM
     input  wire       ld_en,
     input  wire       ld_in,
@@ -134,7 +139,9 @@ module stt_palette #(
   assign index_o = index;
 
   generate
-    if (EXT_FIXED != 0) begin : g_ext_fixed
+    if (INLINE_ENTRY != 0) begin : g_no_fixed
+      assign e_fixed = {ENTRY_W{1'b0}};
+    end else if (EXT_FIXED != 0) begin : g_ext_fixed
       assign e_fixed = fixed_entry_i;
     end else begin : g_own_fixed
       stt_palette_fixed #(.ENTRY_W(ENTRY_W)) u_fixed (
@@ -144,18 +151,31 @@ module stt_palette #(
     end
   endgenerate
 
-  stt_palette_load #(.ENTRY_W(ENTRY_W), .NLOAD(NLOAD)) u_load (
-      .clk    (clk),
-      .rst_n  (rst_n),
-      .index  (index[2:0]),
-      .ld_en  (ld_en),
-      .ld_in  (ld_in),
-      .ld_out (ld_out),
-      .entry  (e_load)
-  );
+  generate
+    if (INLINE_ENTRY != 0) begin : g_no_load
+      assign e_load = {ENTRY_W{1'b0}};
+      assign ld_out = ld_in;          // chain passes through
+    end else begin : g_have_load
+      stt_palette_load #(.ENTRY_W(ENTRY_W), .NLOAD(NLOAD)) u_load (
+          .clk    (clk),
+          .rst_n  (rst_n),
+          .index  (index[2:0]),
+          .ld_en  (ld_en),
+          .ld_in  (ld_in),
+          .ld_out (ld_out),
+          .entry  (e_load)
+      );
+    end
+  endgenerate
 
-  wire use_load = (index >= NFIXED[4:0]);
-  assign entry = use_load ? e_load : e_fixed;
+  generate
+    if (INLINE_ENTRY != 0) begin : g_inline
+      assign entry = inline_entry_i;
+    end else begin : g_lookup
+      wire use_load = (index >= NFIXED[4:0]);
+      assign entry = use_load ? e_load : e_fixed;
+    end
+  endgenerate
 
   // ---- group decode (ISA_NOTES section 5) ------------------------------
   wire [2:0] g_sr = entry[`STT_G_SR_LSB +: `STT_G_SR_W];
