@@ -1,0 +1,146 @@
+{
+ "21/in-sample/uart_tx": {
+  "rows": 5,
+  "split": 0,
+  "loaded": 0,
+  "width": 21,
+  "bits": 105,
+  "ok": true,
+  "speed": 2
+ },
+ "21/in-sample/uart_rx": {
+  "rows": 8,
+  "split": 0,
+  "loaded": 0,
+  "width": 21,
+  "bits": 168,
+  "ok": true,
+  "speed": 3
+ },
+ "21/in-sample/spi": {
+  "rows": 8,
+  "split": 0,
+  "loaded": 0,
+  "width": 21,
+  "bits": 168,
+  "ok": true,
+  "speed": 6.525
+ },
+ "21/in-sample/i2c": {
+  "rows": 22,
+  "split": 0,
+  "loaded": 0,
+  "width": 21,
+  "bits": 462,
+  "ok": true,
+  "speed": 5.875
+ },
+ "21/in-sample/usb": {
+  "rows": 16,
+  "split": 0,
+  "loaded": 5,
+  "width": 21,
+  "bits": 401,
+  "ok": true,
+  "speed": 5
+ },
+ "21/in-sample/total": 1304,
+ "21/leave-one-out/uart_tx": {
+  "rows": 5,
+  "split": 0,
+  "loaded": 0,
+  "width": 21,
+  "bits": 105,
+  "ok": true,
+  "speed": 2
+ },
+ "21/leave-one-out/uart_rx": {
+  "rows": 8,
+  "split": 0,
+  "loaded": 0,
+  "width": 21,
+  "bits": 168,
+  "ok": true,
+  "speed": 3
+ },
+ "21/leave-one-out/spi": {
+  "rows": 8,
+  "split": 0,
+  "loaded": 0,
+  "width": 21,
+  "bits": 168,
+  "ok": true,
+  "speed": 6.525
+ },
+ "21/leave-one-out/i2c": {
+  "rows": 22,
+  "split": 0,
+  "loaded": 1,
+  "width": 21,
+  "bits": 475,
+  "ok": true,
+  "speed": 5.875
+ },
+ "21/leave-one-out/usb": {
+  "rows": 16,
+  "split": 0,
+  "loaded": 7,
+  "width": 21,
+  "bits": 427,
+  "ok": true,
+  "speed": 5
+ },
+ "21/leave-one-out/total": 1343,
+ "32/uart_tx": {
+  "rows": 5,
+  "split": 0,
+  "loaded": 0,
+  "width": 32,
+  "bits": 160,
+  "ok": true,
+  "speed": 2
+ },
+ "32/uart_rx": {
+  "rows": 8,
+  "split": 0,
+  "loaded": 0,
+  "width": 32,
+  "bits": 256,
+  "ok": true,
+  "speed": 3
+ },
+ "32/spi": {
+  "rows": 8,
+  "split": 0,
+  "loaded": 0,
+  "width": 32,
+  "bits": 256,
+  "ok": true,
+  "speed": 6.525
+ },
+ "32/i2c": {
+  "rows": 22,
+  "split": 0,
+  "loaded": 0,
+  "width": 32,
+  "bits": 704,
+  "ok": true,
+  "speed": 5.875
+ },
+ "32/usb": {
+  "rows": 16,
+  "split": 0,
+  "loaded": 0,
+  "width": 32,
+  "bits": 512,
+  "ok": true,
+  "speed": 5
+ },
+ "32/total": 1888,
+ "summary": {
+  "worst_rows_21": 22,
+  "worst_rows_32": 22,
+  "worst_loaded_21": 7,
+  "fits_32_rows": true
+ }
+}

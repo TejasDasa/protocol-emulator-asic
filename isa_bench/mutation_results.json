@@ -1,0 +1,302 @@
+{
+ "uart_tx": {
+  "killed": 30,
+  "total": 31,
+  "pct": 96.7741935483871,
+  "by_class": {
+   "test": {
+    "killed": 5,
+    "total": 5
+   },
+   "target": {
+    "killed": 4,
+    "total": 5
+   },
+   "mode": {
+    "killed": 5,
+    "total": 5
+   },
+   "act_drop": {
+    "killed": 5,
+    "total": 5
+   },
+   "act_add": {
+    "killed": 5,
+    "total": 5
+   },
+   "pinop": {
+    "killed": 3,
+    "total": 3
+   },
+   "pinslot": {
+    "killed": 3,
+    "total": 3
+   },
+   "swap": {
+    "killed": 1,
+    "total": 4
+   }
+  },
+  "survivors": [
+   "target: row START: target DATA -> CHECK",
+   "swap: swap rows START / DATA",
+   "swap: swap rows DATA / CHECK",
+   "swap: swap rows CHECK / STOP"
+  ]
+ },
+ "uart_rx": {
+  "killed": 32,
+  "total": 37,
+  "pct": 86.48648648648648,
+  "by_class": {
+   "test": {
+    "killed": 8,
+    "total": 8
+   },
+   "target": {
+    "killed": 5,
+    "total": 8
+   },
+   "mode": {
+    "killed": 7,
+    "total": 8
+   },
+   "act_drop": {
+    "killed": 4,
+    "total": 5
+   },
+   "act_add": {
+    "killed": 8,
+    "total": 8
+   },
+   "swap": {
+    "killed": 0,
+    "total": 7
+   }
+  },
+  "survivors": [
+   "mode: row IDLE: swap true/false exits",
+   "act_drop: row IDLE: drop action thalf",
+   "target: row CHKST: target BIT -> CNT",
+   "target: row STOPCK: target IDLE -> MID",
+   "target: row BAD: target IDLE -> MID",
+   "swap: swap rows IDLE / MID",
+   "swap: swap rows MID / CHKST",
+   "swap: swap rows CHKST / BIT",
+   "swap: swap rows BIT / CNT",
+   "swap: swap rows CNT / STOP",
+   "swap: swap rows STOP / STOPCK",
+   "swap: swap rows STOPCK / BAD"
+  ]
+ },
+ "spi": {
+  "killed": 46,
+  "total": 54,
+  "pct": 85.18518518518519,
+  "by_class": {
+   "test": {
+    "killed": 3,
+    "total": 8
+   },
+   "target": {
+    "killed": 6,
+    "total": 8
+   },
+   "mode": {
+    "killed": 8,
+    "total": 8
+   },
+   "act_drop": {
+    "killed": 7,
+    "total": 8
+   },
+   "act_add": {
+    "killed": 8,
+    "total": 8
+   },
+   "pinop": {
+    "killed": 7,
+    "total": 7
+   },
+   "pinslot": {
+    "killed": 7,
+    "total": 7
+   },
+   "swap": {
+    "killed": 1,
+    "total": 7
+   }
+  },
+  "survivors": [
+   "test: row IDLE: test fifo -> in0h",
+   "act_drop: row IDLE: drop action trst",
+   "test: row IDLE2: test always -> c2z",
+   "target: row IDLE2: target RISE -> FALL",
+   "test: row FALL: test tmr -> always",
+   "test: row FALL2: test always -> c2z",
+   "target: row MORE: target RISE -> FALL",
+   "test: row END: test tmr -> always",
+   "swap: swap rows IDLE2 / RISE",
+   "swap: swap rows RISE / FALL",
+   "swap: swap rows FALL / FALL2",
+   "swap: swap rows FALL2 / CNT",
+   "swap: swap rows CNT / MORE",
+   "swap: swap rows MORE / END"
+  ]
+ },
+ "i2c": {
+  "killed": 100,
+  "total": 127,
+  "pct": 78.74015748031496,
+  "by_class": {
+   "test": {
+    "killed": 6,
+    "total": 22
+   },
+   "target": {
+    "killed": 19,
+    "total": 22
+   },
+   "mode": {
+    "killed": 20,
+    "total": 22
+   },
+   "act_drop": {
+    "killed": 10,
+    "total": 15
+   },
+   "act_add": {
+    "killed": 21,
+    "total": 22
+   },
+   "pinop": {
+    "killed": 12,
+    "total": 12
+   },
+   "pinslot": {
+    "killed": 12,
+    "total": 12
+   },
+   "swap": {
+    "killed": 1,
+    "total": 21
+   }
+  },
+  "survivors": [
+   "test: row IDLE: test fifo -> in0h",
+   "act_drop: row IDLE: drop action trst",
+   "test: row S1: test tmr -> always",
+   "test: row B0: test tmr -> always",
+   "test: row B1: test tmr -> always",
+   "act_drop: row B2: drop action trst",
+   "test: row B3: test tmr -> always",
+   "test: row A0: test tmr -> always",
+   "test: row A1: test tmr -> always",
+   "target: row A2: target A3 -> A4",
+   "act_drop: row A2: drop action trst",
+   "test: row A3: test tmr -> always",
+   "mode: row A3: swap true/false exits",
+   "test: row A5: test tmr -> always",
+   "test: row N1: test tmr -> always",
+   "target: row N2: target N2 -> N3",
+   "act_add: row N2: add action loadk",
+   "test: row N3: test always -> c2z",
+   "act_drop: row N3: drop action clr",
+   "test: row P0: test tmr -> always",
+   "test: row P1: test tmr -> always",
+   "target: row P1: target P2 -> P3",
+   "test: row P2: test in1h -> in1l",
+   "mode: row P2: swap true/false exits",
+   "act_drop: row P2: drop action trst",
+   "test: row P3: test tmr -> always",
+   "test: row P4: test always -> c2z",
+   "swap: swap rows S1 / B0",
+   "swap: swap rows B0 / B1",
+   "swap: swap rows B1 / B2",
+   "swap: swap rows B2 / B3",
+   "swap: swap rows B3 / B4",
+   "swap: swap rows B4 / A0",
+   "swap: swap rows A0 / A1",
+   "swap: swap rows A1 / A2",
+   "swap: swap rows A2 / A3",
+   "swap: swap rows A3 / A4",
+   "swap: swap rows A4 / A5",
+   "swap: swap rows A5 / A6",
+   "swap: swap rows A6 / N1",
+   "swap: swap rows N1 / N2",
+   "swap: swap rows N2 / N3",
+   "swap: swap rows N3 / P0",
+   "swap: swap rows P0 / P1",
+   "swap: swap rows P1 / P2",
+   "swap: swap rows P2 / P3",
+   "swap: swap rows P3 / P4"
+  ]
+ },
+ "usb": {
+  "killed": 95,
+  "total": 101,
+  "pct": 94.05940594059406,
+  "by_class": {
+   "test": {
+    "killed": 16,
+    "total": 16
+   },
+   "target": {
+    "killed": 14,
+    "total": 15
+   },
+   "mode": {
+    "killed": 16,
+    "total": 16
+   },
+   "act_drop": {
+    "killed": 26,
+    "total": 30
+   },
+   "act_add": {
+    "killed": 16,
+    "total": 16
+   },
+   "pinop": {
+    "killed": 3,
+    "total": 4
+   },
+   "pinslot": {
+    "killed": 4,
+    "total": 4
+   },
+   "swap": {
+    "killed": 1,
+    "total": 15
+   }
+  },
+  "survivors": [
+   "act_drop: row I0: drop action c2load",
+   "act_drop: row I0: drop action trst",
+   "target: row I2: target L0 -> L1",
+   "act_drop: row LS: drop action shift",
+   "act_drop: row LS2: drop action c2load",
+   "pinop: row LS2: pin pair op tgl -> d0",
+   "swap: swap rows I1 / I2",
+   "swap: swap rows I2 / I3",
+   "swap: swap rows I3 / I4",
+   "swap: swap rows I4 / I5",
+   "swap: swap rows I5 / I6",
+   "swap: swap rows I6 / I7",
+   "swap: swap rows I7 / I8",
+   "swap: swap rows I8 / L0",
+   "swap: swap rows L0 / L1",
+   "swap: swap rows L1 / LH",
+   "swap: swap rows LH / LZ",
+   "swap: swap rows LZ / LS",
+   "swap: swap rows LS / LS2",
+   "swap: swap rows LS2 / L6"
+  ]
+ },
+ "_total": {
+  "killed": 303,
+  "total": 350,
+  "pct": 86.57142857142857,
+  "survivors": 97
+ }
+}

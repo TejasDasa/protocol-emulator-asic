@@ -48,7 +48,33 @@ STT row counts: 5, 8, 6, 22, 16. At v2 width (39 bits) the first four become 195
 ## Row-encoding study (`rowenc.py`, `rowformat.py`, `formatsweep.py`, `gensweep.py`, `hybridsweep.py`)
 
 Every format is packed to real integers, unpacked, and the decoded program is rerun on the
-benchmarks (a deliberately corrupted decode is caught).
+benchmarks.
+
+The parenthetical that used to sit here -- "a deliberately corrupted decode is caught" -- was
+never implemented: nothing in this repository corrupted anything, so the claim was plausible
+but untested. `mutate.py` now tests it. It applies single-point corruptions (wrong test code,
+wrong branch mode, shifted target, dropped/added action, wrong pin op or slot) and asserts the
+benchmark fails.
+
+Measured, `python3 mutate.py`:
+
+| benchmark | semantic mutants killed |
+|---|---|
+| uart_tx | 30/31 (96.8%) |
+| uart_rx | 32/37 (86.5%) |
+| spi | 46/54 (85.2%) |
+| i2c | 100/127 (78.7%) |
+| usb | 95/101 (94.1%) |
+| **total** | **303/350 (86.6%)** |
+
+Row-order swaps are reported separately (4/54 killed) and excluded from that rate: targets
+resolve by name, so most adjacent swaps are equivalent mutants.
+
+**Known validation gap.** 14 survivors are the same mutation, `test tmr -> always`, all in SPI
+and I2C: deleting the timer wait does not fail those benchmarks. uart_tx, uart_rx and usb kill
+100% of test mutants (5/5, 8/8, 16/16) because they check jitter; SPI and I2C check data only.
+So "SPI passes" is a weaker statement than "UART TX passes", and bit timing is unverified for
+the two largest programs.
 
 21-bit row: test 4 | branch mode 2 | target 5 | pin slot 2 | pin op 3 | action-set index 5
 
