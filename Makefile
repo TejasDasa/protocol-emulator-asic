@@ -115,11 +115,23 @@ area-chip: lib-check
 	$(call RUN,chip5,stt_chip,$(CHIP_SRCS),,flatten -noscopeinfo,chparam -set NSM 5 stt_chip)
 	$(call RUN,chip3_hier,stt_chip,$(CHIP_SRCS),,,chparam -set NSM 3 stt_chip)
 
-area: area-core area-imem area-extras area-timer area-fifo area-roww area-chip
+# ---- tiled CFGMEM imem: measures the glue the macro does NOT supply.
+# The macro is a blackbox, so `stat` here is exactly the retained load path,
+# WROW write decode and inter-tile read mux. Its own area is added separately
+# on a stated basis (see docs/area-study.md section 5.2).
+CFGMEM_SRCS := $(RTL)/cfgmem_ihp16_bb.v $(RTL)/stt_imem_cfgmem.v
+
+area-cfgmem: lib-check
+	$(call RUN,cfgmem32,stt_imem_cfgmem,$(CFGMEM_SRCS),,flatten -noscopeinfo,chparam -set NTILE 2 -set ROWS 32 stt_imem_cfgmem)
+	$(call RUN,cfgmem64,stt_imem_cfgmem,$(CFGMEM_SRCS),,flatten -noscopeinfo,chparam -set NTILE 4 -set ROWS 64 -set ADDR_W 6 stt_imem_cfgmem)
+
+area: area-core area-imem area-extras area-timer area-fifo area-roww area-chip area-cfgmem
+	@python3 scripts/check_slope.py $(BUILD)
 	@python3 scripts/summarize_area.py $(BUILD)
 
 check:
 	@python3 scripts/check_area.py $(BUILD)/*.log
+	@python3 scripts/check_slope.py $(BUILD)
 
 clean:
 	rm -rf $(BUILD)

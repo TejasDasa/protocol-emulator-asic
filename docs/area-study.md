@@ -12,6 +12,37 @@ cannot be built. That is the open question in §9.
 
 ---
 
+
+---
+
+## Corrections (read this if you saw an earlier version)
+
+Two numbers in earlier revisions of this document were wrong. Both were
+**wrong pairings of two correct measurements**, not wrong measurements — the
+underlying `stat` areas, LEF footprints and flop counts are unaffected.
+
+| claim in earlier revisions | corrected | where |
+|---|---|---|
+| tiling CFGMEM saves ~36,400 µm²/SM (39% of the imem) | **10,318 µm² (18.3%)** cell-basis, **31,359 µm² (33.4%)** placed-basis | §5.4, §9 |
+| moving the imem to DFFRAM takes **6 SMs → about 11** | **6 SMs → 8** | §8, §9 |
+
+**What went wrong.** The CFGMEM saving compared the *entire* `stt_imem` module
+against *bare macros*. A CFGMEM macro supplies the storage bits and its own read
+decode; it does **not** supply the serial staging register, the bit counter, the
+write pointer, the `WROW` one-hot write decode, or the inter-tile read mux.
+Those were charged to neither side. Measuring them (`make area-cfgmem`) puts
+3,030.05 µm² and 31 flops back on the CFGMEM side at 32 rows.
+
+Separately, the saving was computed as `stat/0.6` on the flop side against a LEF
+placed footprint on the macro side — two different bases, in opposite
+directions. A macro's footprint already includes its internal utilization
+(CFGMEM_IHP16 packs its logic cells at 74.8%), so dividing the flop side by an
+assumed 0.60 and comparing to it is not like-for-like.
+
+**This was the second instance of the same failure mode in this document**, so
+§0 now carries an explicit like-for-like rule and every comparison names its
+basis.
+
 ## 0. Method, and what these numbers are not
 
 All areas come from Yosys `stat -liberty` against the typical-corner cmos5l
@@ -37,6 +68,34 @@ zero `sg13g2_` cells**. `make lib-check` re-runs that confirmation.
 > not be compared directly against a tile budget, and it must not be compared
 > against a macro LEF footprint, which includes all of those things. §5.4
 > handles that comparison explicitly.
+
+
+### Like-for-like: a required step, not a review check
+
+Every area figure in this study sits on exactly one of three bases. **Mixing
+them has already produced two wrong conclusions** (see Corrections above), so
+before any two numbers are compared or subtracted, both must be put on the same
+basis and the basis must be named in the text.
+
+| basis | what it is | what it excludes |
+|---|---|---|
+| **cell** | Yosys `stat -liberty`, summed standard-cell areas | clock tree, fill, tap, decap, antenna, routing |
+| **placed** | area of die actually occupied | nothing — it is the die budget |
+| **projected** | `cell / density`, an estimate of placed | — it is a *projection*, never call it measured |
+
+Rules this document follows:
+
+1. **Never compare a `stat` number to a LEF `SIZE`.** A macro's LEF footprint
+   already contains its own fill and decap at its own utilization; `stat` never
+   does. This was error #1.
+2. **Never compare a module to a sub-module.** If block A replaces only part of
+   block B, the remainder of B must be measured and charged to A's side before
+   subtracting. This was error #2.
+3. **A hard macro's footprint is reserved.** Its whitespace cannot host other
+   logic, so on the placed basis it is charged in full, while soft logic around
+   it is charged at the placement density.
+4. **Say which basis, every time.** A number without a stated basis is not a
+   result.
 
 **Validity gate.** Every run is checked by `scripts/check_area.py` for the two
 conditions the study requires: `dfflibmap` mapped flops to real `sg13cmos5l_`
@@ -438,15 +497,21 @@ prebuilt `CFGMEM_IHP16` macro from `kdp1965/ihp-um-janestreet-prism`
 
 The storage cell is a `dlhq_1` latch at **30.84 µm²** against the `dfrbpq_1`
 flop's **48.9888 µm²** — the bit cell itself is **1.59x smaller**. Inside the
-macro, 512 x 30.84 = 15,790.1 µm² of latch sits in a 28,794.5 µm² footprint,
-i.e. the macro packs at **54.8%**.
+macro, 512 x 30.84 = 15,790.1 µm² of latch sits in a 28,794.5 µm² footprint
+(54.8% latch), and all 1029 logic cells together are 21,525.44 µm², so the
+macro packs its logic at **74.8%** of its own footprint.
 
-> **Caveat on using 56.24 µm²/bit for our sizes.** It is measured at 16x32, not
-> at 32x21 or 64x21. A 21-bit-wide array wastes 11 of every 32 columns unless
-> the block is re-parameterised, and per-bit overhead generally improves with
-> depth. Treating 56.24 as our number assumes it scales, which is exactly what
-> building at our size would have checked. It is used in §5.4 as the best
-> available cmos5l measurement, not as a measurement of our design.
+> **Both bases, and what this number is not.** 56.24 µm²/bit is the LEF placed
+> footprint divided by storage bits. On the cell basis the same macro is
+> 21,525.44 / 512 = **42.04 µm²/bit** (1029 logic cells, excluding 1336
+> fill/decap/antenna cells). Per §0 rule 1, the placed figure may only be
+> compared against another placed figure.
+>
+> Neither number is a measurement of *our* imem: it is 16x32, and it excludes
+> the serial load path, `WROW` write decode and inter-tile mux that any real
+> instruction memory must add around it. §9 measures those and gives the
+> corrected comparison. Do not subtract 56.24 from 83.93 and call the
+> difference a saving — that was error #2.
 
 ### 5.3 Variant 3 — IHP SRAM macro (for the record only)
 
@@ -481,35 +546,49 @@ scope here.
 
 ### 5.4 Comparing the three fairly
 
-These numbers are **not** measured the same way and must not be put in one
-column naively:
+Per §0, both sides of every row below are on the **same named basis**, and the
+CFGMEM side is charged for the glue the macro does not supply (§9).
 
-* flop imem **83.93 µm²/bit** — Yosys `stat`, standard cells only.
-* DFFRAM **56.24 µm²/bit** and SRAM **22.68 µm²/bit** — LEF `SIZE`, real
-  placed-and-routed footprints including fill, decap and antenna cells.
+`CFGMEM_IHP16` on both bases, from its own netlist and LEF:
 
-To compare, the flop figure has to be inflated to a placement density. At the
-template's own default (`PL_TARGET_DENSITY_PCT` 60):
+| | value |
+|---|---|
+| logic cells (1029 cells, excl. fill/decap/antenna) | **21,525.44 µm²** → 42.04 µm²/bit |
+| LEF `SIZE` placed footprint | **28,794.50 µm²** → 56.24 µm²/bit |
+| macro's own utilization | 21,525.44 / 28,794.50 = **74.8%** |
 
-| variant | µm²/bit (comparable) | vs flops |
+That 74.8% is why `stat/0.60` must never be compared to a macro LEF: the macro
+is already denser than the density being assumed for the soft logic.
+
+**32-row imem, 21-bit rows, cell basis (`stat` on both sides):**
+
+| variant | µm² | µm²/bit (672 used) |
 |---|---|---|
-| flops, at 60% density | 83.93 / 0.60 = **139.88** | 1.00x |
-| DFFRAM latch macro | **56.24** | **2.49x smaller** |
-| SRAM 2x `1P_64x16`, 64 rows | **22.68** | **6.17x smaller** |
+| flops (`imem32`) | 56,398.77 | 83.93 |
+| 2x CFGMEM + measured glue | 3,030.05 + 2 x 21,525.44 = **46,080.93** | 68.57 |
+| | **saving 10,317.84 (18.3%)** | |
 
-> Both macro rows are measured at the macro's own geometry, not ours: DFFRAM at
-> 16x32 (§5.2) and SRAM at 64x32 with 704 of 2048 bits unused at 64 rows (§5.3).
-> Neither is a measurement of a 32x21 or 64x21 array. The flop row is the only
-> one measured at our actual size.
+**Same, placed basis (die actually occupied):**
+
+| variant | µm² |
+|---|---|
+| flops, `stat`/0.60 (projected) | 93,997.95 |
+| 2x macro footprint (reserved) + glue/0.60 | 57,589.00 + 5,050.08 = **62,639.08** |
+| | **saving 31,358.87 (33.4%)** |
+
+The placed basis is the one that matters for the die budget, because a macro's
+footprint is reserved (§0 rule 3). The cell basis is the one that needs no
+density assumption. Both are reported; neither is 39%.
+
+SRAM is left out of this table deliberately: §5.3 prices it as bare macros with
+no glue measured, so it is not yet on a comparable footing with either column.
 
 **Access pattern.** Written once at load, read every cycle, mostly sequential
-with short-range branches. That suits all three. The real constraint is the
+with short-range branches — that suits all three. The real constraint is the
 asynchronous read in `stt_imem` (§0): a synchronous macro needs an added
-pipeline stage, which costs a cycle of branch latency the ISA does not
-currently model.
-
----
-
+pipeline stage, costing a cycle of branch latency the ISA does not model.
+CFGMEM is a latch array and reads asynchronously, so it does **not** have this
+problem; the IHP SRAM would.
 ## 6. Optional units, priced before freezing the row width
 
 `make area-extras`.
@@ -661,15 +740,13 @@ Reproduce: `make area-chip && python3 scripts/summarize_area.py build --density 
 
 ## 8. What this means for freezing the encoding
 
-1. **The imem is the whole ballgame** — 73% of an SM. On the best cmos5l
-   measurement available, a DFFRAM latch array is worth ~2.5x on those bits
-   (§5.4). The imem is 56,580 of the 77,325 µm² that replicates per SM (§7), so
-   cutting it ~2.5x takes PER_SM from 78,960 to roughly 45,000 — which at 60%
-   density moves the budget from **6 SMs to about 11** (6.64 → 11.61). That is
-   the single largest lever in this study — decide it before freezing the row
-   width. It is a *projection*: the 2.49x is measured at the macro's own 16x32
-   geometry (§5.2), not at ours, and §9 shows a 21-bit row only gets 1.63x
-   unless the row widens to 32.
+1. **The imem is the whole ballgame** — 73% of an SM (56,580 of the 77,325 µm²
+   that replicates). Moving it to tiled CFGMEM is **measured** at 18.3% (cell
+   basis) or 33.4% (placed) once the retained load path is charged to the macro
+   side, which takes the budget from **6 SMs to 8** (§9). This is still the
+   single largest lever in the study — decide it before freezing the row width.
+   **Corrected:** earlier revisions claimed 6 → about 11, from a saving that
+   compared a whole module against bare macros on mismatched bases.
 2. **Row width is expensive at 32 rows.** A measured **2,617.72 µm² per row
    bit** (§5.1b) — 2.42x the whole bit stuffer. Conversely the 16-bit CRC unit
    costs only 1.28 row bits, so it pays for itself if it saves two.
@@ -686,54 +763,78 @@ Reproduce: `make area-chip && python3 scripts/summarize_area.py build --density 
 
 ---
 
-## 9. The one open question
+## 9. Does tiled CFGMEM actually pay? — measured
 
-**Do we need DFFRAM's generic `ram` block ported to cmos5l, or can we live with
-tiling the fixed 16x32 block?**
+Earlier revisions answered this by comparing the whole `stt_imem` module against
+bare macros. `make area-cfgmem` now measures the missing piece directly.
 
-§5.2 establishes that DFFRAM currently ports only `cfgmem_ihp` to cmos5l, fixed
-at 16 x 32, so 32x21 and 64x21 cannot be built directly. But the existing
-`CFGMEM_IHP16` can be *tiled*, and that turns out to be good enough to matter.
+**`stt_imem_cfgmem`** has the identical external interface to `stt_imem`, with
+the row array replaced by tiled `CFGMEM_IHP16` macros (blackboxed, so `stat`
+reports only the surrounding glue). What it must keep:
 
-Comparing like for like — both sides as **real placed footprints**, so the flop
-imem is inflated from `stat` to the template's 60% density (§5.4):
+| retained outside the macro | |
+|---|---|
+| `stage[21]`, `bitc[5]`, `wptr[5]` | 31 flops |
+| `WROW` one-hot write-row decode | the macro's write select is one-hot, decoded outside |
+| inter-tile read mux | 2 tiles at 32 rows, 4 at 64 |
 
-| option | µm² | µm²/bit (used) | vs flops |
+Measured glue (cell basis):
+
+| rows | tiles | cells | flops | µm² |
+|---|---|---|---|---|
+| 32 | 2 | 160 | **31** | **3,030.05** |
+| 64 | 4 | 252 | 32 | 3,641.73 |
+
+The 31 flops match the `stage`+`bitc`+`wptr` decomposition of §2 exactly, which
+is the check that the glue is the right glue.
+
+**Attributing `stt_imem`'s 21,959.64 µm² of combinational area** (56,398.77
+total − 34,439.13 sequential):
+
+| | µm² |
+|---|---|
+| replaced by the macro (32:1 x 21-bit read decode) | **20,448.24** |
+| retained (shift-in, `WROW` decode, tile mux) | **1,511.40** |
+
+So the macro does replace the great majority of the combinational logic — the
+read decode really is the bulk of it — but not all, and the retained 1,511.40 +
+1,518.65 of flops is what the earlier comparison omitted.
+
+### The answer
+
+| basis | flops | tiled CFGMEM | saving |
 |---|---|---|---|
-| 32x21 flops (`stat` 56,398.77 @ 60%) | 93,998 | 139.88 | 1.00x |
-| 32x21 as 2x `CFGMEM_IHP16` | 57,589 | 85.70 | **1.63x smaller** |
-| 64x21 as 4x `CFGMEM_IHP16` | 115,178 | 85.70 | **1.60x smaller** |
-| 32x**32** as 2x `CFGMEM_IHP16` | 57,589 | 56.24 | **2.49x smaller** |
+| cell (`stat` both sides) | 56,398.77 | 46,080.93 | **10,317.84 (18.3%)** |
+| placed (die occupied) | 93,997.95 | 62,639.08 | **31,358.87 (33.4%)** |
 
-Tiling wastes 11 of every 32 columns at a 21-bit row (`56.24 / (21/32) =
-85.70`), which is why the 21-bit rows land at 85.70 rather than 56.24. Even so,
-**tiling the existing macro already saves ~36,400 µm² per SM, about 39% of the
-imem's real footprint**, with no DFFRAM work at all.
+**Tiling is viable and it does pay — but by 18–33%, not the 39% claimed, and
+the row does not need to widen to 32 bits for it to pay.** At 21-bit rows the
+macro wastes 11 of its 32 columns and still comes out ahead.
 
-So, in increasing cost:
+### What it does to the SM count
 
-1. **Tile `CFGMEM_IHP16` at 21 bits.** No DFFRAM work. 1.63x on the imem.
-2. **Widen the row to 32 bits and tile.** Also no DFFRAM work, and the column
-   waste disappears: 2.49x. This reframes the row-width question entirely — at
-   32 bits wide the marginal row bit is *free up to the 33rd*, which inverts
-   §5.1b's 2,617.72 µm²/bit and makes the CRC/bit-stuffer encoding decisions in
-   §6 and §8 much cheaper.
-3. **Port the generic `ram` block** (RAM word blocks in `block_definitions.v`
-   plus a placer class) for arbitrary 32x24 / 128x24 geometries. Most work; only
-   worth it if neither of the above fits.
+Charging macros their reserved footprint and the soft logic at 60% density:
 
-I have not implemented any of these — they are architecture changes, and this
-task was scoped to area characterization. **Option 2 is what I would evaluate
-first**, and it is a row-encoding decision, so it belongs in the freeze.
+```
+N x (2 x 28,794.50)  +  (17,000.50 + N x 25,410.23) / 0.60  <=  902,417
+```
 
-> Caveat carried from §5.2: 56.24 µm²/bit is measured at 16x32. Tiling assumes
-> it holds per macro instance, which is reasonable (each tile *is* that macro)
-> but adds inter-macro routing and the §5.3 PDN problem — the TT single-layer
-> PDN cannot reach Metal4 macro power pins without the `ExtendPowerStripes`-style
-> plugin that prism uses. **That integration cost is real and is not priced
-> here.**
+where 25,410.23 = PER_SM 78,960.32 − chip-context imem 56,580.14 + glue 3,030.05.
 
----
+| imem | N | SMs |
+|---|---|---|
+| flops (§7 baseline) | 6.64 | **6** |
+| tiled CFGMEM, placed basis | 8.75 | **8** |
+| tiled CFGMEM, cell basis throughout | 7.66 | 7 |
+
+**6 → 8 SMs.** Earlier revisions said 6 → 11; that came from scaling the whole
+imem by a 2.49x that was itself measured stat-vs-LEF and assumed the macro
+replaced the load path.
+
+> **Still not priced.** The Tiny Tapeout single-layer PDN cannot reach the
+> macros' Metal4 power pins without the `ExtendPowerStripes`-style plugin prism
+> uses, and 2N macros must be floorplanned on the tile's stripe pitch. That is
+> real integration work and it is not in any number above.
 ## Appendix A — Ambiguity A1: TIMER_W sweep
 
 `make area-timer`. Flattened `stt_core` at each width.
