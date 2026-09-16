@@ -112,27 +112,53 @@ the two largest programs.
 | 24 fixed + 8 loadable, leave-one-out | 916 | 1343 | 16 rows, 5 cyc/bit |
 | PIO | 864 | 1264* | |
 
-### Where the timing margin actually sits
+### Where the timing margin actually sits — and why the first answer was wrong
 
-The `tol` default of 0.25 is generous, and tightening it changes nothing: the check is a
-*minimum*, and the nominals are anchored at or below the measured baseline, so the baseline
-still passes at `tol = 0`. The margin lives in the nominal, not the tolerance.
+The `tol` default of 0.25 is generous, and tightening it changes nothing: the
+check is a *minimum*, and the nominals are anchored at or below the measured
+baseline, so the baseline still passes at `tol = 0`.
 
-Measuring it properly -- raise the required minimum at `tol = 0` until the baseline program
-violates it:
+An earlier version of this section then "measured the margin" by raising the
+required minimum until the baseline failed, and reported 0% for SPI SCK and I2C
+SCL low. **That number was an artifact and the alarm attached to it was wrong.**
 
-| check | nominal | holds up to | margin |
+**Why it was an artifact.** The nominal was anchored at exactly what the program
+produces. Sweeping P shows every phase is an exact, deterministic function of P:
+
+| P | SPI SCK phase | I2C SCL low | I2C SCL high |
 |---|---|---|---|
-| SPI SCK phase | 16 cycles (P/2) | 16.0 | **0%** |
-| I2C SCL low | 16 cycles (P/2) | 16.0 | **0%** |
-| I2C SCL high | 8 cycles (P/4) | 10.0 | 25% |
+| 16 | 8 | 8 | 6 |
+| 24 | 12 | 12 | 8 |
+| 32 | 16 | 16 | 10 |
+| 48 | 24 | 24 | 14 |
+| 64 | 32 | 32 | 18 |
 
-**Two of the three have no slack at all.** The programs hit their bit period exactly, which is
-correct behaviour for a cycle-accurate model and a warning for silicon: any added delay in the
-pin-drive path -- output buffer, pad, board -- comes straight out of the phase, with nothing in
-hand. The 25% on SCL high is an artifact of the program using `thalf` there, not deliberate
-margin.
+SCK and SCL-low are exactly `P/2`; SCL-high is exactly `P/4 + 2`. Anchoring at
+`P/2` and then asking "how much longer than `P/2` is it" can only ever answer
+zero. The 25% reported for SCL high was the constant `+2`, which is why it moved
+with P (50% at P=16, 12.5% at P=64) instead of staying fixed.
 
-This is why the tolerance is a parameter rather than a constant. It is the knob for asking
-"would this still work if the pin path cost us N cycles", and the answer today is no for SPI
-SCK and I2C SCL low at any N > 0.
+**Why the alarm was wrong.** The claim was that "any delay in the pin-drive path
+comes straight out of the phase". It does not. Phase length here is a count of
+core clock cycles between two toggles, and it is integral and exact. A
+register-to-pad delay `d` shifts *every* edge by `d`, so a phase measures
+`(t2 + d) - (t1 + d)` and is unchanged. Pad delay moves the waveform; it does
+not compress it.
+
+**What the real silicon risks are**, none of which a cycle-accurate model can
+see:
+
+* **Inter-pin skew.** If SCK and MOSI, or SCL and SDA, have different pad and
+  routing delays, the data-to-clock relationship shifts and setup/hold at the
+  far end degrades. This is the actual failure mode, and it needs STA with SDF
+  back-annotation, not this model.
+* **Absolute time against spec minimums.** I2C standard mode wants
+  `t_HIGH >= 4.0 us` and `t_LOW >= 4.7 us` in real time. Whether `P/4 + 2`
+  cycles clears that depends on the core clock, which is a system choice. Note
+  the duty cycle is low-heavy (about 33%), which is the spec-friendly direction.
+* **PVT and clock jitter.** These scale the whole waveform together, so ratios
+  are preserved; only absolute-time requirements are affected.
+
+So the tolerance remains the right knob for asking "would this still work if the
+pin path cost us N cycles" — but the honest answer is that the model cannot
+answer it, because the model has no pin path. That question belongs to STA.

@@ -180,18 +180,36 @@ the flop baseline. The 32-row budget is not merely tight; it is load-bearing for
 this recommendation. That argues for spending some of D's 3 spare bits, or
 future ISA work, on making state-machine protocols cheaper in rows.
 
-### 5.3 Timing margin is zero on two of three checks
+### 5.3 Timing: the model cannot see the risk that matters
 
-| check | nominal | holds to | margin |
-|---|---|---|---|
-| SPI SCK phase | 16 cycles (P/2) | 16.0 | **0%** |
-| I²C SCL low | 16 cycles (P/2) | 16.0 | **0%** |
-| I²C SCL high | 8 cycles (P/4) | 10.0 | 25% |
+An earlier revision of this document reported "timing margin is 0% on SPI SCK
+and I²C SCL low" as an alarming finding. **That was wrong on both counts** and
+is corrected here (§8, correction 4).
 
-The programs hit their bit period exactly. Correct for a cycle-accurate model;
-a warning for silicon, where any pin-path delay comes straight out of the phase.
-Independent of the row-format decision, but it is the thing most likely to bite
-in fabrication.
+The 0% was an artifact of anchoring: the nominal was set to exactly what the
+program produces. Sweeping P shows every phase is an exact function of P — SCK
+and SCL-low are precisely `P/2`, SCL-high precisely `P/4 + 2` — so asking "how
+much longer than `P/2` is it" could only answer zero.
+
+The attached alarm — that pin-path delay "comes straight out of the phase" — was
+also wrong. Phase length is a count of core clock cycles between two toggles,
+integral and exact. A pad delay `d` shifts every edge by `d`, so the phase
+measures `(t2 + d) − (t1 + d)` and is unchanged. Pad delay moves the waveform; it
+does not compress it.
+
+**The real timing risks are outside this model entirely:**
+
+* **Inter-pin skew** — differing pad and routing delay between SCK and MOSI, or
+  SCL and SDA, shifting the data-to-clock relationship. This is the actual
+  failure mode and it needs STA with SDF back-annotation.
+* **Absolute time against spec minimums** — I²C standard mode wants
+  `t_HIGH ≥ 4.0 µs`, `t_LOW ≥ 4.7 µs`. Whether the programmed cycle counts clear
+  that depends on the core clock. The duty cycle is low-heavy (~33%), which is
+  the spec-friendly direction.
+
+So timing is neither reassuring nor alarming on this evidence — it is
+**unmeasured**, and it belongs to STA. That is already §7 item 5, and it is the
+most important thing this study does *not* establish.
 
 ---
 
@@ -231,8 +249,12 @@ area. **Recommend keeping both.**
 4. **Post-P&R area for our own design.** Every per-SM figure is `stat` cell area
    or a density projection. No routing, no clock tree, no congestion. The
    template harden calibrates the die, not our logic.
-5. **Timing closure at 50 MHz.** No STA has been run on `stt_core`. §5.3 is a
-   model-level result, not a silicon-level one.
+5. **Timing, at every level.** No STA has been run on `stt_core`, and no
+   SDF-back-annotated simulation on anything. §5.3 explains why the
+   cycle-accurate model cannot speak to pin timing at all: it has no pin path.
+   Inter-pin skew between SCK/MOSI and SCL/SDA is the failure mode that matters
+   and it is entirely unmeasured. **This is the largest verification gap in the
+   study**, and the first thing the next sixteen weeks should close.
 6. **Whether the 13-bit grouping is right.** C and D share it. The 1.37%
    reachability of all action subsets is a design choice nobody has re-examined
    since it was set.
@@ -241,7 +263,7 @@ area. **Recommend keeping both.**
 
 ## 8. Correction history
 
-Three derived conclusions in this study were wrong, and each was caught by
+Four derived conclusions in this study were wrong, and each was caught by
 measuring rather than arguing. They are kept here deliberately: for a
 competition that says verification is what it judges, a decision document that
 shows its own errors being found is worth more than a clean one.
@@ -251,6 +273,7 @@ shows its own errors being found is worth more than a clean one.
 | tiling CFGMEM saves ~36,400 µm²/SM (39%) | 10,318 (18.3%) cell, 31,359 (33.4%) placed | building `stt_imem_cfgmem` and measuring the glue the macro does not supply |
 | moving the imem to DFFRAM: 6 SMs → ~11 | 6 → 8 | same |
 | "8 injected-bug tests, all caught" | never existed | searching the repository for it |
+| "timing margin is 0% on SPI SCK and I²C SCL low" | an anchoring artifact, and the alarm attached to it was mechanically wrong (§5.3) | sweeping P and finding every phase exact |
 
 **The pattern in the first two is one failure mode**: comparing two correct
 measurements on mismatched bases — a module against a bare macro, `stat` against
@@ -264,3 +287,12 @@ not just the documents. `isa_bench/mutate.py` now implements what the claim
 described (89.1% semantic kill rate), and `mutate.py --gate` fails the build if
 the score or the mutant count regresses. Unbacked prose in the older documents
 should be treated as unverified until checked.
+
+**The fourth is a third kind of error.** Not a mismatched basis, and not an
+unbacked claim, but a measurement that was **tautological by construction** —
+anchoring a nominal at exactly the observed value, then measuring the gap to it
+— wrapped in a mechanism argument that was simply incorrect. It survived review
+twice, including mine, partly because the number looked alarming, and alarming
+numbers attract less scrutiny than convenient ones. The check that caught it was
+cheap and should have been automatic: vary the parameter and see whether the
+result moves. It did not, which is the signature of an artifact.
