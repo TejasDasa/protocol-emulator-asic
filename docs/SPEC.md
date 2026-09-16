@@ -174,7 +174,8 @@ row**, before any of the row's actions take effect.
 
 <!-- END GENERATED: tests -->
 
-Traced to `SttCore._test` in `isa_bench/stt.py`. Codes 10–15 are not assigned;
+Traced to `SttCore._test` in `isa_bench/stt.py`. Code 10 is RESERVED as `stall`
+for the bit stuffer (§9) and has no implementation. Codes 11–15 are unassigned;
 see §16.
 
 Three of these need their sampling point stated precisely, and §8 does so:
@@ -327,6 +328,8 @@ rule an implementer applies; it is not a statistic.
 | `xx`  | at most one of `call`, `crcrst`, `crcstep`; except {`crcrst`, `call`} may appear together                      |
 
 An action set is encodable in one row if and only if it satisfies every rule above. That makes **1800** distinct action sets reachable.
+
+That count is over the codes that are IMPLEMENTED. The reserved codes in §9 add three to the `xx` group, taking it from 5 choices to 8; an implementation that includes the wider shared units therefore reaches 2880 distinct sets. The two numbers are the same rule applied to different code sets, not a discrepancy.
 
 <!-- END GENERATED: action-rule -->
 
@@ -718,6 +721,113 @@ therefore constrained to `uio`.
 values listed there. What the output pins do between power-up and the first
 clock edge is not modelled. See §16.
 
+### 11.1 Pin assignment
+
+**SPECIFIED.** A state machine's slots and inputs are not wired to fixed pins.
+Every drivable pin carries a select field naming the one driver that drives it,
+and every machine input carries a select field naming the one pin it reads.
+Both fields ride the serial configuration chain (§10).
+
+<!-- BEGIN GENERATED: pin-map -->
+<!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
+
+| group    | width | pin index | can drive | can be read |
+|----------|-------|-----------|-----------|-------------|
+| `uo_out` | 8     | 0-7       | yes       | no          |
+| `uio`    | 8     | 8-15      | yes       | yes         |
+| `ui_in`  | 8     | 0-7       | no        | yes         |
+
+At **5 state machines**:
+
+| quantity                        | value        | from                  |
+|---------------------------------|--------------|-----------------------|
+| drivers to place                | 15           | 5 machines x 3 slots  |
+| output-capable pins             | 16           | `uo_out` + `uio`      |
+| inputs to source                | 10           | 5 machines x 2 inputs |
+| input-capable pins              | 16           | `ui_in` + `uio`       |
+| output select field             | 4 bits       | ceil(log2(15))        |
+| output select chain             | 64 bits      | 16 pins x 4 bits      |
+| input select field              | 4 bits       | ceil(log2(16))        |
+| input select chain              | 40 bits      | 10 inputs x 4 bits    |
+| `run` flag                      | 1 bit        | §11.1                 |
+| **pin-assignment config total** | **105 bits** |                       |
+
+<!-- END GENERATED: pin-map -->
+
+**SPECIFIED — the output side is pin-centric, and that settles contention.**
+Each of the 16 output-capable pins selects exactly one driver, where a driver is
+a (machine, slot) pair numbered `machine * 3 + slot`. The consequence is
+structural rather than a rule anyone has to enforce: **two machines cannot
+target the same pin, because a pin does not choose two drivers.** The question
+of what happens on contention does not arise, and no arbitration exists or is
+needed.
+
+The following all follow from the same shape and are **SPECIFIED**:
+
+- **Several pins may select the same driver.** One slot can appear on many pins.
+  This is legal and is how a signal is fanned out.
+- **A machine may have any number of its slots mapped, from none to all three.**
+  There is no per-machine limit. The only limit is that 16 pins exist.
+- **A driver no pin selects is simply unobserved.** It is not an error. A
+  machine whose slots are all unmapped still runs, still counts and still tests;
+  it just drives nothing.
+- **The output enable follows the same select.** A `uio` pin is driven when its
+  selected driver's slot has its output enable asserted, and is high-impedance
+  otherwise. `uo_out` pins ignore the output enable and are always driven (§11),
+  so an open-drain slot (§7) mapped to a `uo_out` pin cannot release the net.
+- **Reset value.** All select fields reset to zero, so before the chain is
+  loaded every pin selects driver 0, which is machine 0 slot 0. An
+  implementation must load the pin-assignment chain before enabling the
+  machines; the reset state is defined but is not useful.
+
+**SPECIFIED — the boundary caps how many slots can be mapped at once.** There
+are 16 output-capable pins and a driver per (machine, slot), so **at most 16
+drivers can be mapped simultaneously**. At five machines that is 15 of 16, and
+every slot of every machine can be on a pin at the same time. At six it would be
+18, so at least two slots would have to stay unmapped — legal, per the rule
+above, but it means six machines cannot all use three pins. This is a constraint
+on the boundary, entirely independent of whether six machines route, and it
+points the same way.
+
+**SPECIFIED — `run`, and why the pin budget depends on it.** One bit in the
+configuration chain separates configuration from operation. It is cleared by
+`rst_n` and set by the host as the last step of configuration; nothing clears it
+but reset, so live reprogramming means asserting `rst_n` (§16).
+
+While `run` = 0, these pins carry control and are not available to the iomux:
+
+<!-- BEGIN GENERATED: pin-config-mode -->
+<!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
+
+| pin           | role while `run` = 0                              |
+|---------------|---------------------------------------------------|
+| `ui_in[3:0]`  | imem, palette, config and pin-select load enables |
+| `ui_in[4]`    | serial load data                                  |
+| `ui_in[6:5]`  | host TX write and RX read strobes                 |
+| `uio_in[7:5]` | state-machine select for the load chains          |
+
+<!-- END GENERATED: pin-config-mode -->
+
+While `run` = 1 **none of them is reserved**: all 8 `ui_in` and all 8 `uio` bits
+are available as machine inputs, and all 8 `uio` pins are bidirectional.
+
+This bit is load-bearing, not a convenience. Without it those pins would be
+consumed permanently, leaving `uo_out[7:0]` plus `uio[4:0]` — **13
+output-capable pins for 15 drivers**. Five machines with three slots each would
+not fit on the boundary at all. With it, 15 drivers have 16 pins.
+
+**CURRENT BEHAVIOUR — the structural RTL does not implement this.**
+`rtl/stt_iomux.v` implements the output side as specified above: a per-pin
+select field, `NSM * NSLOT : 1` muxes on data and output enable, loaded as a
+shift chain. It does **not** implement the input side that way. Inputs are a
+fixed tap — machine *m* reads `ui_in[2m]` and `ui_in[2m+1]`, wrapping into
+`uio_in` once that runs past 8 — which at five machines gives machine 4
+`uio_in[1:0]` and collides with the control pins above. There is also no `run`
+flag: `rtl/stt_chip.v` decodes `ui_in[6:0]` and `uio_in[7:5]` as control
+unconditionally, so a protocol driving `ui_in[0]` high during operation would
+start an instruction-memory load. **Both are specification changes the RTL has
+yet to make, not descriptions of it.** See §16.
+
 ---
 
 ## 12. Memory organization
@@ -811,9 +921,27 @@ grid that is necessarily empty at that point and fails hard. With the recipe in
 `pdn_test/`, one state machine with two tiles hardens with zero power-grid
 violations, zero DRC errors and LVS reporting "Circuits match uniquely".
 
-**Target clock.** The Tiny Tapeout template sets `CLOCK_PERIOD` to 20 ns, i.e.
-**50 MHz**. **Fmax is not verified**: no STA has been run on this design at any
-frequency. 50 MHz is the target, not a result.
+**Target clock, and what STA says about it.** The Tiny Tapeout template sets
+`CLOCK_PERIOD` to 20 ns, i.e. **50 MHz**. That target is **not met worst-case**.
+Post-route STA on a five-machine design with extracted parasitics
+(`floorplan/`):
+
+| corner | setup | hold |
+|---|---|---|
+| slow, 1.08 V, 125 °C | **−1.266 ns VIOLATED** | +0.506 ns MET |
+| typ, 1.20 V, 25 °C | +3.641 ns MET | +0.202 ns MET |
+| fast, 1.32 V, −40 °C | +6.483 ns MET | +0.016 ns MET |
+
+**Worst-case frequency is about 47 MHz.** Hold is met at every corner after
+2,218 hold buffers. Two caveats, both material:
+
+- **That design is configuration C, not the format this document specifies.**
+  C has a palette lookup D does not and D has an inline 13-bit action decode C
+  does not; the critical paths are different logic and D's Fmax is unmeasured.
+- 115 max-fanout, 4 max-slew and 1 max-cap violations were outstanding, several
+  of them artifacts of an observability port that XOR-reduces signals from every
+  machine into one pin and of a `clk` net with 1,844 terminals. Neither belongs
+  in a design meant to be taped out, so the −1.266 ns is not a floor.
 
 ---
 
@@ -861,16 +989,17 @@ and where the evidence stops.
 | **`load` from an empty TX FIFO** | The model raises an error; hardware behaviour is undefined. | §9 |
 | **Test codes 11–15** | Unassigned. The models would raise on decode. Code 10 and pin op code 7 are now reserved (§9). | §4, §7 |
 | **A 33rd row in hardware** | The toolchain rejects it. The structural RTL's 5-bit write pointer wraps and overwrites row 0. | §12 |
-| **Run/halt and live reprogramming** | Whether a state machine may be reprogrammed while running, and its state on the first cycle after a reload. | §10 |
+| **Live reprogramming** | §11.1 specifies that the `run` flag is cleared only by `rst_n`, so reprogramming means asserting reset. What a machine does on the first cycle after a reload short of reset is still undefined. | §10, §11.1 |
 | **Power-up before the first clock edge** | Output pin state between power-up and reset is not modelled. | §11 |
 
 ### 16.2 Specified but unverified
 
 | item | status |
 |---|---|
-| **Static timing analysis** | Never run, at any frequency. 50 MHz is a target. This is the largest verification gap. |
+| **Static timing analysis** | RUN, for configuration C at five machines: post-route setup is −1.266 ns at the slow corner, about 47 MHz, hold met at every corner (§14). NOT run for format D, whose critical paths differ. |
 | **Inter-pin skew** | The model has no pin path. Skew between a clock and its data — SCK/MOSI, SCL/SDA — is the failure mode that matters in silicon and is entirely unmeasured. |
-| **Multi-state-machine floorplan** | Single-machine integration is demonstrated and LVS-clean. Several machines with their tiles on the placement grid, each machine's logic near its own tiles, is untested. |
+| **Multi-state-machine floorplan** | RUN. Five machines and ten macros place and route with zero router DRC errors, and all ten macros are geometrically verified as powered from the routed DEF. Six machines could not be made to route at any placement density or macro grouping. Signoff DRC and LVS are still owed: the flow stopped at IR-drop analysis on a plugin connectivity gap (`floorplan/README.md`). |
+| **The input select path and the `run` flag** | §11.1 specifies per-machine input selects and a `run` flag that releases the control pins during operation. `rtl/stt_iomux.v` implements neither: inputs are a fixed tap that collides with the control pins, and `rtl/stt_chip.v` decodes control unconditionally. Specified, unimplemented. |
 | **The structural RTL** | `rtl/` was written to measure area. It implements the *previous* row format (21-bit, 5-bit target, palette) and has never passed a functional test. It is not an implementation of this specification. |
 
 ### 16.3 Reachable but unexercised

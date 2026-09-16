@@ -26,6 +26,28 @@
     {"name": "slot_stuff",    "unit": "bit_stuffer", "maps_to": "in_valid/in_bit: per-slot route bit, the slot's output passes through the stuffer"}
   ],
 
+  "_pin_map_note": "Section 11.1. The output side is pin-centric: every drivable pin carries a select field naming the ONE driver that drives it, so two state machines cannot contend for a pin -- the question cannot arise. The input side is specified the same way; note that rtl/stt_iomux.v currently uses a fixed tap instead, which is recorded as CURRENT BEHAVIOUR in the document.",
+
+  "pin_map": {
+    "nsm": 5,
+    "nslot": 3,
+    "nin": 2,
+    "out_capable_pins": 16,
+    "in_capable_pins": 16,
+    "bidirectional_pins": 8,
+    "groups": [
+      {"name": "uo_out", "width": 8, "index": "0-7",  "out": true,  "in": false},
+      {"name": "uio",    "width": 8, "index": "8-15", "out": true,  "in": true},
+      {"name": "ui_in",  "width": 8, "index": "0-7",  "out": false, "in": true}
+    ],
+    "config_mode_pins": [
+      {"pin": "ui_in[3:0]",  "role": "imem, palette, config and pin-select load enables"},
+      {"pin": "ui_in[4]",    "role": "serial load data"},
+      {"pin": "ui_in[6:5]",  "role": "host TX write and RX read strobes"},
+      {"pin": "uio_in[7:5]", "role": "state-machine select for the load chains"}
+    ]
+  },
+
   "next_row_rule": {
     "rule": "next = (row + 1) mod 32",
     "note": "next from row 31 wraps to row 0. Taken from rtl/stt_decode.v:73, which needs no program-length register. isa_bench/rowenc.py:182 wraps at the end of the PROGRAM instead; the two differ only for a program shorter than 32 rows that takes next from its own last row, which no reference program does -- all six end on a WAIT row, whose exits are both explicit."

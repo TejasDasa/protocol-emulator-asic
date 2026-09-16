@@ -102,6 +102,12 @@ def blocks(spec):
     b["action-rule"] = table(["group", "rule"], lines) + (
         f"\n\nAn action set is encodable in one row if and only if it satisfies every "
         f"rule above. That makes **{total}** distinct action sets reachable."
+        + (f"\n\nThat count is over the codes that are IMPLEMENTED. The reserved codes "
+           f"in \u00a79 add three to the `xx` group, taking it from "
+           f"{len(spec['action_groups'][-1]['choices'])} choices to 8; an implementation that "
+           f"includes the wider shared units therefore reaches "
+           f"{total // len(spec['action_groups'][-1]['choices']) * 8} distinct sets. The two "
+           f"numbers are the same rule applied to different code sets, not a discrepancy.")
     )
 
     b["state"] = table(
@@ -133,6 +139,37 @@ def blocks(spec):
     b["next-row-rule"] = (f"**`next` = `{spec['next_row_rule']['rule']}`.**\n\n"
                           + spec["next_row_rule"]["note"])
 
+
+    pm = spec["pin_map"]
+    selw = max(1, (pm["nsm"] * pm["nslot"] - 1).bit_length())
+    inw = max(1, (pm["in_capable_pins"] - 1).bit_length())
+    drivers = pm["nsm"] * pm["nslot"]
+    inputs = pm["nsm"] * pm["nin"]
+    b["pin-map"] = table(
+        ["group", "width", "pin index", "can drive", "can be read"],
+        [[f"`{g['name']}`", g["width"], g["index"],
+          "yes" if g["out"] else "no", "yes" if g["in"] else "no"]
+         for g in pm["groups"]]
+    ) + "\n\nAt **" + str(pm["nsm"]) + " state machines**:\n\n" + table(
+        ["quantity", "value", "from"],
+        [["drivers to place", f"{drivers}", f"{pm['nsm']} machines x {pm['nslot']} slots"],
+         ["output-capable pins", f"{pm['out_capable_pins']}", "`uo_out` + `uio`"],
+         ["inputs to source", f"{inputs}", f"{pm['nsm']} machines x {pm['nin']} inputs"],
+         ["input-capable pins", f"{pm['in_capable_pins']}", "`ui_in` + `uio`"],
+         ["output select field", f"{selw} bits", f"ceil(log2({drivers}))"],
+         ["output select chain", f"{pm['out_capable_pins'] * selw} bits",
+          f"{pm['out_capable_pins']} pins x {selw} bits"],
+         ["input select field", f"{inw} bits", f"ceil(log2({pm['in_capable_pins']}))"],
+         ["input select chain", f"{inputs * inw} bits", f"{inputs} inputs x {inw} bits"],
+         ["`run` flag", "1 bit", "§11.1"],
+         ["**pin-assignment config total**",
+          f"**{pm['out_capable_pins'] * selw + inputs * inw + 1} bits**", ""]]
+    )
+
+    b["pin-config-mode"] = table(
+        ["pin", "role while `run` = 0"],
+        [[f"`{c['pin']}`", c["role"]] for c in pm["config_mode_pins"]]
+    )
 
     return b
 

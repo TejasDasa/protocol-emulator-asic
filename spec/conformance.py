@@ -117,6 +117,28 @@ def main():
                   r["field"], len(dict(_G).get(r["field"][4:], []))),
               f"reserved {r['field']} code {r['code']} collides with a live code")
 
+    # ---- pin map (section 11.1) -----------------------------------------
+    pm = spec.get("pin_map", {})
+    real_slots = [s for s in SLOTS if s != "pair"]
+    check(pm.get("nslot") == len(real_slots),
+          f"pin_map nslot: spec {pm.get('nslot')} vs models {len(real_slots)} "
+          f"(rowformat.SLOTS minus 'pair')")
+    check(pm.get("out_capable_pins") == sum(g["width"] for g in pm.get("groups", []) if g["out"]),
+          "pin_map out_capable_pins does not equal the width of the groups marked out")
+    check(pm.get("in_capable_pins") == sum(g["width"] for g in pm.get("groups", []) if g["in"]),
+          "pin_map in_capable_pins does not equal the width of the groups marked in")
+    # The run flag is what makes the boundary fit: without it the config-mode
+    # pins stay reserved and there are fewer output-capable pins than drivers.
+    reserved = 3 + 7          # uio_in[7:5] and ui_in[6:0]
+    drivers = pm.get("nsm", 0) * pm.get("nslot", 0)
+    check(drivers <= pm.get("out_capable_pins", 0),
+          f"{drivers} drivers cannot ALL be mapped at once onto "
+          f"{pm.get('out_capable_pins')} output-capable pins. Leaving a slot unmapped is "
+          f"legal (section 11.1), but the specified configuration should be fully mappable")
+    check(drivers > pm.get("out_capable_pins", 0) - (reserved - 7),
+          "section 11.1 claims the run flag is load-bearing, but the drivers would "
+          "fit without it -- the claim in the document is wrong")
+
     # ---- row field layout ------------------------------------------------
     # Rebuild the field list the way rowformat.Format does for the frozen row
     # (single5 pins, grouped actions, 8-bit target) and compare offsets.
