@@ -97,11 +97,68 @@ def covered(rect, shapes, tol=0.001):
     return False
 
 
+
+def parse_disconnected_table(path):
+    """{instance: [disconnected power pin, ...]} from LibreLane's
+    full_disconnected_pins_table.txt. Column 3 is the disconnected POWER pins."""
+    import re
+    rows, cur = {}, None
+    for line in open(path, errors="replace"):
+        s = re.sub(r"[│┃]", "|", line)
+        if "|" not in s:
+            continue
+        cells = [c.strip() for c in s.split("|")[1:-1]]
+        if len(cells) < 3 or cells[0].startswith("Macro/Instance"):
+            continue
+        if cells[0]:
+            cur = cells[0].replace("\\", "")
+            rows.setdefault(cur, [])
+        if cur and cells[2]:
+            rows[cur].append(cells[2].replace("\\", ""))
+    return rows
+
+
+def gate_disconnected(table_path, verified_instances, macro):
+    """Narrow the ERROR_ON_DISCONNECTED_PINS suppression.
+
+    The suppression exists only because ExtendPowerStripes connects the macros
+    physically without writing the ODB iterm annotation. It must NOT be allowed
+    to hide a genuinely unpowered pin once there are 18 macros. So: every
+    disconnected POWER pin must belong to a macro instance whose pin rectangles
+    this script has just verified as covered. Anything else fails.
+    """
+    rows = parse_disconnected_table(table_path)
+    unexplained = []
+    explained = 0
+    for inst, pins in rows.items():
+        for pin in pins:
+            owner = pin.rsplit("/", 1)[0] if "/" in pin else inst
+            if owner in verified_instances:
+                explained += 1
+            else:
+                unexplained.append(pin)
+    print(f"\n=== disconnected-power-pin gate ===")
+    print(f"  {explained} disconnected power pin(s) belong to macros verified "
+          f"covered above -- expected, the ODB annotation gap")
+    if unexplained:
+        print(f"  {len(unexplained)} NOT explained by verified macro geometry:")
+        for p in unexplained[:10]:
+            print(f"    {p}")
+        print("  FAIL: ERROR_ON_DISCONNECTED_PINS is suppressed, so this gate is "
+              "the only thing standing between you and a genuinely unpowered pin.")
+        return 1
+    print("  OK: no unexplained disconnected power pins.")
+    return 0
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("deff")
     ap.add_argument("lef")
     ap.add_argument("--macro", default="CFGMEM_IHP16")
+    ap.add_argument("--disconnected-table",
+                    help="LibreLane full_disconnected_pins_table.txt; when given, "
+                         "every disconnected POWER pin must be one of the macro "
+                         "pins verified covered here, else the gate fails")
     args = ap.parse_args()
 
     pins = lef_pin_rects(args.lef, args.macro)
@@ -134,6 +191,13 @@ def main():
         print(f"FAIL: {bad} macro/net pairs have uncovered power pins.")
         return 1
     print("OK: every macro power pin rectangle is covered by its special net.")
+
+    if args.disconnected_table:
+        # DEF instance names carry escaped brackets (u_imem.g_tile\\[0\\].u_tile)
+        # while the report table does not. Normalise both sides before matching,
+        # or the gate false-fails on every macro.
+        verified = {k.replace("\\", "") for k in place}
+        return gate_disconnected(args.disconnected_table, verified, args.macro)
     return 0
 
 

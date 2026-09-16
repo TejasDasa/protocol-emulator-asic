@@ -159,3 +159,40 @@ disconnected while the extracted layout says otherwise.
 reading the ODB annotation. That is why suppressing the check is defensible here
 and would not be if LVS had anything to say. Anyone re-running this should treat
 those 2 as expected and check LVS instead.
+
+## The suppression is narrowed, not blanket
+
+`ERROR_ON_DISCONNECTED_PINS = 0` on its own is too broad: with 18 macros it
+would equally hide a pin that is genuinely unpowered. So the suppression is
+paired with a gate that cannot be satisfied by silence.
+
+```bash
+python3 verify_macro_power.py <routed.def> macro/CFGMEM_IHP16.lef \
+    --disconnected-table <run>/45-odb-reportdisconnectedpins/full_disconnected_pins_table.txt
+```
+
+It does two things, and the second is the point:
+
+1. every macro power pin rectangle must be covered by Metal4 on its net;
+2. **every disconnected POWER pin in LibreLane's report must belong to a macro
+   whose pins step 1 just verified.** Anything else fails the gate.
+
+So the only disconnections that pass are the ones the geometry independently
+proves are fine. A newly unpowered block cannot hide behind the suppression.
+
+Verified both directions on the real run:
+
+```
+  4 disconnected power pin(s) belong to macros verified covered above  -> OK, exit 0
+  inject one unexplained pin (some_other_block/VPWR)                   -> FAIL, exit 1
+```
+
+Note `design__critical_disconnected_pin__count` is 2 while the table lists 4
+power pins: the metric counts *instances*, the table counts pins.
+
+## Known cosmetic issue in this harness
+
+The top level also reports 13 disconnected signal pins, `fixed_entry_i[0..12]`.
+That is the `EXT_FIXED` palette input on `stt_core`, unused here because
+`stt_core_cfgmem` runs with `EXT_FIXED = 0`. Harmless for the PDN question and
+non-critical, but a real multi-SM top should not expose it.
