@@ -1,0 +1,126 @@
+{
+  "_source_of_truth": "This file is the single machine-readable source for every encoding table in docs/SPEC.md. The Markdown tables are GENERATED from it by spec/gen_spec.py; do not edit them in the document. spec/conformance.py checks this file field-by-field against the authoritative Python models in isa_bench/, and `make spec-check` fails if either the document or the models drift from it.",
+  "_authority": "Where the Python models in isa_bench/ and the structural RTL in rtl/ disagree, the Python models win: they are the versions that pass the benchmarks. As of the freeze they agree on every shared constant (verified by conformance.py).",
+
+  "row_width": 32,
+  "max_rows": 32,
+  "ret_code": 255,
+
+  "fields": [
+    {"name": "test",     "lsb": 0,  "width": 4,  "description": "Test code selecting the condition evaluated on entry to the row."},
+    {"name": "mode",     "lsb": 4,  "width": 2,  "description": "Branch mode: how the true and false exits are derived from the target field."},
+    {"name": "target",   "lsb": 6,  "width": 8,  "description": "Branch target row index, or 255 meaning return to the link register."},
+    {"name": "pin_slot", "lsb": 14, "width": 2,  "description": "Which output slot the pin operation applies to; 3 selects the D+/D- pair."},
+    {"name": "pin_op",   "lsb": 16, "width": 3,  "description": "Pin operation applied to the selected slot."},
+    {"name": "act_sr",   "lsb": 19, "width": 3,  "description": "Action group: shift register."},
+    {"name": "act_c1",   "lsb": 22, "width": 3,  "description": "Action group: counter 1."},
+    {"name": "act_c2",   "lsb": 25, "width": 2,  "description": "Action group: counter 2."},
+    {"name": "act_tm",   "lsb": 27, "width": 2,  "description": "Action group: timer."},
+    {"name": "act_xx",   "lsb": 29, "width": 3,  "description": "Action group: CRC and call."}
+  ],
+
+  "tests": [
+    {"code": 0, "name": "always", "description": "Unconditionally true."},
+    {"code": 1, "name": "c2z",    "description": "True when counter 2 reads zero."},
+    {"code": 2, "name": "cz",     "description": "True when counter 1 reads zero."},
+    {"code": 3, "name": "fifo",   "description": "True when the TX FIFO is not empty."},
+    {"code": 4, "name": "in0h",   "description": "True when synchronized input 0 reads 1."},
+    {"code": 5, "name": "in0l",   "description": "True when synchronized input 0 reads 0."},
+    {"code": 6, "name": "in1h",   "description": "True when synchronized input 1 reads 1."},
+    {"code": 7, "name": "in1l",   "description": "True when synchronized input 1 reads 0."},
+    {"code": 8, "name": "srbit",  "description": "True when the shift register serial bit reads 1."},
+    {"code": 9, "name": "tmr",    "description": "True on the cycle the timer reaches zero (the tick)."}
+  ],
+
+  "branch_modes": [
+    {"code": 0, "name": "WAIT",   "on_true": "target", "on_false": "self", "description": "Stay on this row until the test passes, then go to target."},
+    {"code": 1, "name": "BRANCH", "on_true": "target", "on_false": "next", "description": "Take the target when the test passes, otherwise fall through."},
+    {"code": 2, "name": "SKIP",   "on_true": "next",   "on_false": "target", "description": "Fall through when the test passes, otherwise take the target."},
+    {"code": 3, "name": "STEP",   "on_true": "next",   "on_false": "self", "description": "Fall through when the test passes, otherwise stay. The target field is unused."}
+  ],
+
+  "pin_slots": [
+    {"code": 0, "name": "slot0", "description": "Output slot 0."},
+    {"code": 1, "name": "slot1", "description": "Output slot 1."},
+    {"code": 2, "name": "slot2", "description": "Output slot 2."},
+    {"code": 3, "name": "pair",  "description": "The D+/D- pair: writes slots 0 and 1 together."}
+  ],
+
+  "pin_ops": [
+    {"code": 0, "name": "hold", "single": "No write. The slot keeps its value.", "pair": "No write."},
+    {"code": 1, "name": "lo",   "single": "Drive 0.", "pair": "Drive (0,0)."},
+    {"code": 2, "name": "hi",   "single": "Drive 1.", "pair": "Drive (1,1)."},
+    {"code": 3, "name": "sr",   "single": "Drive the shift register serial bit.", "pair": "Drive (srbit, NOT srbit)."},
+    {"code": 4, "name": "tgl",  "single": "Invert the slot.", "pair": "Invert both slots."},
+    {"code": 5, "name": "d0",   "single": "UNSPECIFIED for a single slot (see SPEC section 16).", "pair": "Drive (0,1)."},
+    {"code": 6, "name": "d1",   "single": "UNSPECIFIED for a single slot (see SPEC section 16).", "pair": "Drive (1,0)."}
+  ],
+
+  "action_groups": [
+    {"name": "sr", "lsb": 0, "width": 3, "description": "Shift register. At most one choice per row.",
+     "choices": [
+       {"code": 0, "actions": [],                 "description": "No shift-register action."},
+       {"code": 1, "actions": ["load"],           "description": "Load a byte popped from the TX FIFO."},
+       {"code": 2, "actions": ["loadk"],          "description": "Load the configured constant K."},
+       {"code": 3, "actions": ["loadcrc"],        "description": "Load the complement of the CRC register, 5 bits."},
+       {"code": 4, "actions": ["clr"],            "description": "Clear to zero."},
+       {"code": 5, "actions": ["shift"],          "description": "Shift one place in the configured direction, inserting the fill bit."},
+       {"code": 6, "actions": ["clr", "shift"],   "description": "Clear then shift."},
+       {"code": 7, "actions": ["push"],           "description": "Push the shift register to the RX FIFO."}
+     ]},
+    {"name": "c1", "lsb": 3, "width": 3, "description": "Counter 1. At most one choice per row.",
+     "choices": [
+       {"code": 0, "actions": [],           "description": "No counter 1 action."},
+       {"code": 1, "actions": ["cload"],    "description": "Load counter 1 from configured value A."},
+       {"code": 2, "actions": ["cload_b"],  "description": "Load counter 1 from configured value B."},
+       {"code": 3, "actions": ["cload_c"],  "description": "Load counter 1 from configured value C."},
+       {"code": 4, "actions": ["cdec"],     "description": "Decrement counter 1, wrapping modulo 256."}
+     ]},
+    {"name": "c2", "lsb": 6, "width": 2, "description": "Counter 2. At most one choice per row.",
+     "choices": [
+       {"code": 0, "actions": [],          "description": "No counter 2 action."},
+       {"code": 1, "actions": ["c2load"],  "description": "Load counter 2 from its configured value."},
+       {"code": 2, "actions": ["c2dec"],   "description": "Decrement counter 2, wrapping modulo 256."}
+     ]},
+    {"name": "tm", "lsb": 8, "width": 2, "description": "Timer reload override. At most one choice per row.",
+     "choices": [
+       {"code": 0, "actions": [],         "description": "No timer action; the timer free-runs."},
+       {"code": 1, "actions": ["trst"],   "description": "Reload the timer with P-1 (a full bit period)."},
+       {"code": 2, "actions": ["thalf"],  "description": "Reload the timer with P/2-1 (half a bit period)."}
+     ]},
+    {"name": "xx", "lsb": 10, "width": 3, "description": "CRC and call. At most one choice per row.",
+     "choices": [
+       {"code": 0, "actions": [],                    "description": "No action."},
+       {"code": 1, "actions": ["crcrst"],            "description": "Reset the CRC register to all ones."},
+       {"code": 2, "actions": ["crcstep"],           "description": "Advance the CRC by the shift register serial bit."},
+       {"code": 3, "actions": ["call"],              "description": "Write the row's false exit into the link register."},
+       {"code": 4, "actions": ["crcrst", "call"],    "description": "Reset the CRC and link, in that order."}
+     ]}
+  ],
+
+  "action_order": ["load", "loadk", "loadcrc", "clr", "crcrst", "crcstep", "shift", "push",
+                   "cload", "cload_b", "cload_c", "cdec", "c2load", "c2dec", "trst", "thalf", "call"],
+
+  "state": [
+    {"name": "row",    "width": 8,  "reset": "0",   "scope": "per-SM", "description": "Row pointer. Indexes the instruction memory."},
+    {"name": "link",   "width": 8,  "reset": "0",   "scope": "per-SM", "description": "Link register, written by the call action, read by target 255."},
+    {"name": "sr",     "width": 8,  "reset": "0",   "scope": "per-SM", "description": "Shift register."},
+    {"name": "cnt",    "width": 8,  "reset": "0",   "scope": "per-SM", "description": "Counter 1. Decrements wrap modulo 256."},
+    {"name": "c2",     "width": 8,  "reset": "0",   "scope": "per-SM", "description": "Counter 2. Decrements wrap modulo 256."},
+    {"name": "crc",    "width": 5,  "reset": "0x1F","scope": "per-SM", "description": "CRC5 register, reflected polynomial 0x14."},
+    {"name": "tcount", "width": "UNSPECIFIED", "reset": "P-1", "scope": "per-SM", "description": "Timer down-counter. Width is not fixed by the models; see SPEC section 16."},
+    {"name": "pinv",   "width": 3,  "reset": "configured init_pins", "scope": "per-SM", "description": "Output slot values, one bit per slot."}
+  ],
+
+  "config": [
+    {"name": "P",          "description": "Timer reload period, in core clock cycles.", "used_by": ["tmr", "trst", "thalf"]},
+    {"name": "shift",      "description": "Shift direction, left or right. Selects which end of the shift register is the serial bit.", "used_by": ["shift", "srbit"]},
+    {"name": "fill",       "description": "Fill bit source for shift: constant 0, constant 1, or synchronized input 0.", "used_by": ["shift"]},
+    {"name": "sr_width",   "description": "Shift register width.", "used_by": ["shift", "srbit", "load", "loadk", "clr"]},
+    {"name": "cload_abc",  "description": "The three counter 1 reload constants.", "used_by": ["cload", "cload_b", "cload_c"]},
+    {"name": "c2load_val", "description": "Counter 2 reload constant.", "used_by": ["c2load"]},
+    {"name": "loadk",      "description": "The constant K loaded by loadk.", "used_by": ["loadk"]},
+    {"name": "init_pins",  "description": "Reset value of each output slot.", "used_by": []},
+    {"name": "slot_modes", "description": "Per slot: push-pull or open-drain. In open-drain a 1 releases the net and a 0 drives it low.", "used_by": []}
+  ]
+}

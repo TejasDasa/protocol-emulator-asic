@@ -27,7 +27,7 @@ CORE_SRCS := $(RTL)/stt_decode.v $(RTL)/stt_palette.v $(RTL)/stt_datapath.v \
 
 FIFO_SRCS := $(CORE_SRCS) $(RTL)/stt_fifo.v $(RTL)/stt_core_fifo.v
 
-.PHONY: area area-core area-imem area-extras check clean lib-check
+.PHONY: area area-core area-imem area-extras check clean lib-check spec spec-check
 
 # ---------------------------------------------------------------- lib check
 lib-check:
@@ -168,7 +168,22 @@ area: area-core area-imem area-extras area-timer area-fifo area-roww area-chip a
 # Listed explicitly rather than pattern-matched, so adding one is a deliberate act.
 COMB_RUNS := pal_inline
 
-check:
+# ---- specification ---------------------------------------------------------
+# docs/SPEC.md is normative and its encoding tables are GENERATED from
+# spec/isa.json. Two gates keep the three descriptions of the encoding -- the
+# document, the machine-readable source, and the Python models -- from drifting
+# apart silently:
+#   conformance.py : spec/isa.json   vs  isa_bench/   (models are authoritative)
+#   gen_spec.py    : docs/SPEC.md    vs  spec/isa.json
+spec-check:
+	@python3 spec/conformance.py
+	@python3 spec/gen_spec.py --check
+
+spec:
+	@python3 spec/gen_spec.py
+	@python3 spec/conformance.py
+
+check: spec-check
 	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
 	@for r in $(COMB_RUNS); do \
 	   test -f $(BUILD)/$$r.log && python3 scripts/check_area.py $(BUILD)/$$r.log --comb-ok || true; \
