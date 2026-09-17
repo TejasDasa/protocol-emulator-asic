@@ -190,6 +190,7 @@ check: spec-check
 	@$(MAKE) --no-print-directory check-freeze
 	@$(MAKE) --no-print-directory check-can
 	@$(MAKE) --no-print-directory check-pinmap
+	@$(MAKE) --no-print-directory check-phase
 	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
 	@for r in $(COMB_RUNS); do \
 	   test -f $(BUILD)/$$r.log && python3 scripts/check_area.py $(BUILD)/$$r.log --comb-ok || true; \
@@ -219,6 +220,15 @@ check-freeze:
 # it is a gate too: the transmitter must still fit in 32 rows and still decode
 # against an independent CRC-15 and a receiver that is shown to reject
 # corrupted frames.
+# Phase and jitter in the device models (SPEC section 16.2). The gate is that
+# adding them did NOT move the deterministic waveform: every existing result was
+# measured against the old fixed-run construction, so the default has to stay
+# bit-for-bit what it was. It also checks the knobs actually move edges, since a
+# knob that does nothing would pass the first half trivially.
+.PHONY: check-phase
+check-phase:
+	@cd isa_bench && python3 phase_check.py | tail -1
+
 # A pin assignment that cannot work configures cleanly and then does nothing:
 # a program using `load`, `push` or `fifo` with no pin selecting the host port
 # never moves a byte, and an open-drain slot on uo_out can never release the

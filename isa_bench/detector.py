@@ -125,7 +125,7 @@ class SquareDriver:
             w.nets[self.net].drive("sq", ((w.t - self.t0) // self.half) % 2)
 
 
-def run_detect(kind, P=32, prog_override=None):
+def run_detect(kind, P=32, prog_override=None, phase=0.0, jitter=0.0, seed=None):
     """Build a world of the given kind and run the detector on it.
 
     Returns (detections, cycles, errors).
@@ -144,7 +144,7 @@ def run_detect(kind, P=32, prog_override=None):
         frames = [(b, True) for b in
                   (0x55, 0xC3, 0x00, 0xFF, 0xA5, 0x3C, 0x0F, 0xF0,
                    0x81, 0x7E, 0x01, 0x80)]
-        drv = UartDriver("rx", P, frames)
+        drv = UartDriver("rx", P, frames, phase=phase, jitter=jitter, seed=seed)
         w.devices = [drv]
         limit = drv.end + 8 * P
     elif kind == "uart_skew":
@@ -156,7 +156,8 @@ def run_detect(kind, P=32, prog_override=None):
         frames = [(b, True) for b in
                   (0x55, 0xC3, 0x00, 0xFF, 0xA5, 0x3C, 0x0F, 0xF0,
                    0x81, 0x7E, 0x01, 0x80)]
-        drv = UartDriver("rx", (P * 33) // 32, frames)
+        drv = UartDriver("rx", (P * 33) // 32, frames, phase=phase,
+                         jitter=jitter, seed=seed)
         w.devices = [drv]
         limit = drv.end + 8 * P
     elif kind == "uart_badstop":
@@ -165,7 +166,7 @@ def run_detect(kind, P=32, prog_override=None):
         frames = [(b, False) for b in
                   (0x55, 0xC3, 0x00, 0xFF, 0xA5, 0x3C, 0x0F, 0xF0,
                    0x81, 0x7E, 0x01, 0x80)]
-        drv = UartDriver("rx", P, frames)
+        drv = UartDriver("rx", P, frames, phase=phase, jitter=jitter, seed=seed)
         w.devices = [drv]
         limit = drv.end + 8 * P
     elif kind == "high":
@@ -204,15 +205,26 @@ CASES = [("uart", True), ("uart_skew", True), ("uart_badstop", False),
          ("square", False), ("square_aligned", True)]
 
 
-def check_all(prog_override=None, P=32):
-    """True if the detector gets every case right. Used by the mutation run."""
+# SPEC §16.2. The device models used to drive every waveform from a fixed start
+# on an integer-cycle grid, so the detector's timer and the traffic it saw were
+# in a deterministic phase relationship BY CONSTRUCTION. Sweeping the phase over
+# a whole bit period is what makes mid-bit alignment load-bearing rather than
+# lucky: without it, dropping `thalf` survived every case.
+PHASES = (0.0, 0.17, 0.33, 0.5, 0.67, 0.83)
+
+
+def check_all(prog_override=None, P=32, phases=PHASES, jitter=0.0):
+    """True if the detector gets every case right at every phase."""
     for kind, want in CASES:
-        try:
-            n, _, errs = run_detect(kind, P, prog_override=prog_override)
-        except Exception:
-            return False          # a crash is a catch, not a survival
-        if (n > 0) != want or errs:
-            return False
+        for frac in (phases if kind.startswith("uart") else (0.0,)):
+            try:
+                n, _, errs = run_detect(kind, P, prog_override=prog_override,
+                                        phase=frac * P, jitter=jitter,
+                                        seed=int(frac * 1000) + 1)
+            except Exception:
+                return False      # a crash is a catch, not a survival
+            if (n > 0) != want or errs:
+                return False
     return True
 
 

@@ -63,24 +63,50 @@ class UartMonitor:
 
 
 class UartDriver:
-    """Drives frames onto a line. frames: list of (byte, good_stop)."""
+    """Drives frames onto a line. frames: list of (byte, good_stop).
 
-    def __init__(self, net, period, frames, t0=40, gap_bits=2):
+    SPEC §16.2: the waveform is built from BIT BOUNDARY TIMES rather than from
+    fixed-length runs, so `period` may be fractional and each boundary may be
+    displaced. With the defaults -- integer period, jitter 0 -- every boundary
+    lands exactly where the old fixed-run construction put it, so existing
+    results are unchanged. `phase` and `jitter` are what make a machine's timer
+    and the traffic it observes independent, which by construction they were
+    not.
+
+      phase   cycles to delay the first edge, may be fractional. A phase of
+              period/2 puts every edge exactly between two of the machine's
+              timer ticks.
+      jitter  each boundary is displaced by U(-jitter, +jitter) cycles,
+              independently, so bit widths vary the way a real line's do.
+    """
+
+    def __init__(self, net, period, frames, t0=40, gap_bits=2,
+                 phase=0.0, jitter=0.0, seed=None):
         self.net = net
         self.wave = {}
-        t = t0
+        rng = random.Random(seed) if (jitter and seed is not None) else None
+        t = float(t0) + float(phase)
+        runs = []                       # (level, nominal start)
         for byte, good in frames:
             bits = [0] + bits_lsb(byte, 8) + [1 if good else 0]
             for b in bits:
-                for i in range(period):
-                    self.wave[t + i] = b
+                runs.append((b, t))
                 t += period
-            if not good:        # line held low a little longer, then idle
-                for i in range(period):
-                    self.wave[t + i] = 0
+            if not good:                # line held low a little longer
+                runs.append((0, t))
                 t += period
+            runs.append((1, t))         # idle gap
             t += gap_bits * period
-        self.end = t
+        bounds = [start for (_lvl, start) in runs] + [t]
+        if rng is not None:
+            bounds = [b + rng.uniform(-jitter, jitter) for b in bounds]
+            for i in range(1, len(bounds)):     # keep boundaries ordered
+                if bounds[i] < bounds[i - 1] + 1:
+                    bounds[i] = bounds[i - 1] + 1
+        for i, (lvl, _start) in enumerate(runs):
+            for c in range(int(round(bounds[i])), int(round(bounds[i + 1]))):
+                self.wave[c] = lvl
+        self.end = int(round(bounds[-1]))
 
     def step(self, w):
         w.nets[self.net].drive("uart_drv", self.wave.get(w.t, 1))

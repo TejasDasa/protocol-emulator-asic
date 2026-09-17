@@ -152,3 +152,27 @@ python3 detrun.py            # all eight cases
 python3 detector_mutate.py   # mutation
 cd ../rtl2 && python3 tb/run_tests.py uart_detect   # lockstep against the RTL
 ```
+
+
+## Update: phase is now swept, and the `thalf` survivor is dead
+
+The finding below has been acted on. `devices.UartDriver` builds its waveform
+from bit-boundary times rather than fixed-length runs, so it takes a fractional
+period, an arbitrary phase and per-boundary jitter; `check_all` sweeps the phase
+over a whole bit period for every UART case.
+
+| | mutants | killed | survived | kill rate | `thalf` mutant |
+|---|---|---|---|---|---|
+| fixed phase, as before | 66 | 47 | 19 | 71.2% | **survives** |
+| phase swept over a bit period | 66 | 49 | 17 | 74.2% | **killed** |
+| phase swept + 1.5 cycles jitter | 66 | 49 | 17 | 74.2% | killed |
+
+The two survivors sweeping phase removes are exactly the two about the row that
+does the mid-bit alignment: `drop action thalf` and `swap true/false exits` on
+`IDLE`. Jitter on top of phase adds nothing further, which is itself worth
+knowing — for this program phase was the whole gap.
+
+`isa_bench/phase_check.py` gates that the default waveform did not move: it
+rebuilds the old fixed-run construction and compares the line value at every
+cycle, at four periods. Every existing result was measured against that
+waveform, so it has to stay identical, and it does.
