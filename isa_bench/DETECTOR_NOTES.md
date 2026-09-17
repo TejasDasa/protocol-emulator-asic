@@ -176,3 +176,35 @@ knowing — for this program phase was the whole gap.
 rebuilds the old fixed-run construction and compares the line value at every
 cycle, at four periods. Every existing result was measured against that
 waveform, so it has to stay identical, and it does.
+
+
+## The baud capture window, measured
+
+`DETECTOR_NOTES` says auto-baud is not applicable and that several machines each
+testing a candidate baud is the architectural answer. `isa_bench/baud_window.py`
+puts a number on it, and the number is smaller than the naive measurement.
+
+Running a detector configured for period P against real UART at P*r, at four
+phases:
+
+| | r range |
+|---|---|
+| fires at every phase | 0.81 - 1.05 |
+| fires **and samples correctly** | **0.91 - 1.05** |
+
+The gap is the detector firing on traffic it cannot sample. Shown UART ~15%
+faster than assumed, it over-runs the frame, and the stop-bit check then passes
+trivially against the idle line -- so it confirms "UART at P" while pushing a
+byte that was never sent. "Did it detect" is the wrong question; the window has
+to be measured on whether the byte it pushes is one that was actually
+transmitted.
+
+So the capture window is **-5% to +10% of baud**, adjacent candidates may be
+spaced by a factor of **1.154**, and therefore:
+
+* **five machines cover a 1.77x baud range**, not an open-ended sweep;
+* covering a 10x range would need 17.
+
+That does not overturn the multi-candidate answer, but it bounds it: it is a
+way to cover a handful of nearby candidate rates, not a way to find an arbitrary
+unknown baud. Anyone quoting the approach should quote the 1.77x with it.
