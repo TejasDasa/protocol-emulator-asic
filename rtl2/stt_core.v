@@ -140,10 +140,19 @@ module stt_core #(
   wire [SR_W-1:0] sr_mask  = mask_ext[SR_W-1:0];
   wire [3:0]      msb_idx  = cfg_sr_width - 4'd1;
 
+  // Every dependency is an ARGUMENT, deliberately. Reading cfg_shift_left and
+  // msb_idx from the enclosing scope instead is legal Verilog but leaves the
+  // continuous assignments below sensitive only to `v`, so the result is
+  // computed once with whatever the configuration register held at time 0 and
+  // refreshed only when the shift register changes. The reference programs all
+  // shift constantly, which hides it; a random program that leaves the shift
+  // register alone for 33 cycles carried an X into the `srbit` test.
   function automatic srbit_of;
     input [SR_W-1:0] v;
+    input            left;
+    input [3:0]      idx;
     begin
-      srbit_of = cfg_shift_left ? v[msb_idx] : v[0];
+      srbit_of = left ? v[idx] : v[0];
     end
   endfunction
 
@@ -151,7 +160,7 @@ module stt_core #(
   wire tick = (tcount == {TIMER_W{1'b0}});
 
   // ---- step 2: the test, on state as it stands at the start of the cycle -
-  wire srbit_pre = srbit_of(sr);
+  wire srbit_pre = srbit_of(sr, cfg_shift_left, msb_idx);
   reg  test_pass;
   always @* begin
     case (f_test)
@@ -172,15 +181,21 @@ module stt_core #(
 
   // ---- step 3: actions, in the SPEC section 6.3 order --------------------
   // sr_mid: after load / loadk / loadcrc / clr, which precede crcstep.
+  // `load` on an EMPTY TX FIFO. SPEC section 16.1 records this as unspecified:
+  // the model calls w.error and leaves the shift register UNCHANGED, and what
+  // hardware does is not defined. The models are authoritative (SPEC section 0),
+  // so the shift register holds and no pop is issued. Found by the mutation
+  // suite: `uart_tx/act_add/row START: add action load` drains the FIFO faster
+  // than the program refills it and reaches this case at cycle 995.
   reg [SR_W-1:0] sr_mid;
   always @* begin
-    if      (act_load)    sr_mid = tx_data  & sr_mask;
+    if      (act_load)    sr_mid = tx_ne ? (tx_data & sr_mask) : sr;
     else if (act_loadk)   sr_mid = cfg_loadk & sr_mask;
     else if (act_loadcrc) sr_mid = {{(SR_W-5){1'b0}}, ~crc};
     else if (act_clr)     sr_mid = {SR_W{1'b0}};
     else                  sr_mid = sr;
   end
-  wire srbit_mid = srbit_of(sr_mid);
+  wire srbit_mid = srbit_of(sr_mid, cfg_shift_left, msb_idx);
 
   // crc: crcrst then crcstep, both after the loads above.
   wire [4:0] crc_stepped = ((crc[0] ^ srbit_mid) ? ((crc >> 1) ^ 5'h14)
@@ -205,7 +220,7 @@ module stt_core #(
   // push and shift are in the same group, so they never both occur.
   assign rx_data = sr_mid;
   assign rx_push = fire & act_push;
-  assign tx_pop  = fire & act_load;
+  assign tx_pop  = fire & act_load & tx_ne;
 
   // counters
   reg [CNT_W-1:0] cnt_next;
@@ -224,7 +239,7 @@ module stt_core #(
   end
 
   // ---- step 4: the pin op, which sees sr_next ---------------------------
-  wire srbit_post = srbit_of(sr_next);
+  wire srbit_post = srbit_of(sr_next, cfg_shift_left, msb_idx);
   reg [NSLOT-1:0] pinv_next;
   always @* begin
     pinv_next = pinv;

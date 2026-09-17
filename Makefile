@@ -245,3 +245,12 @@ rtl2-test:
 rtl2: rtl2-isa-check rtl2-latch rtl2-test
 
 COCOTB_PY ?= python3
+
+# Mutation and random-program lockstep. Both need cocotb and a simulator, so
+# like rtl2-test they are separate from `make check`.
+.PHONY: rtl2-mutants rtl2-random rtl2-full
+rtl2-mutants:
+	@cd rtl2 && $(COCOTB_PY) tb/run_mutants.py
+rtl2-random:
+	@cd rtl2 && $(COCOTB_PY) tb/run_random.py
+rtl2-full: rtl2-isa-check rtl2-latch rtl2-test rtl2-mutants rtl2-random
