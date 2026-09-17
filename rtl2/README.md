@@ -28,10 +28,13 @@ area study reproducible. This is a separate implementation, not an extension.
 
 ## Deliberately NOT implemented
 
-Out of scope for this pass, and absent rather than half-built: multiple state
-machines, `stt_iomux` and the pin-assignment chain, `stt_hostbuf`, the `run`
-flag (SPEC §11.1), `crc_lfsr16`, `bit_stuffer`, and the reserved codes of SPEC
-§9. Those come after one machine is proven.
+Still absent rather than half-built: `stt_hostbuf`, `crc_lfsr16`,
+`bit_stuffer`, and the reserved codes of SPEC §9. Until the shared host FIFOs
+exist, `stt_chip` brings the per-machine host byte interface out as ports, which
+is NOT TT-legal -- the real top has only `ui_in`/`uo_out`/`uio`.
+
+Done since: replication to five machines, `stt_iomux` with the pin-assignment
+chain, and the `run` flag.
 
 Both memories are built and both pass every suite: `stt_imem.v` is a
 behavioural array, `stt_imem_cfgmem.v` drives two real `CFGMEM_IHP16` macros.
@@ -299,6 +302,55 @@ Area is very slightly sub-linear (5 x 94,646 = 473,232 against 472,778 measured)
 because the machines share the `sm_sel` decode. Flops are exactly linear, which
 is the property that matters for detecting merged state.
 
+## The Tiny Tapeout boundary: iomux and the run flag
+
+`stt_iomux.v` and `stt_chip.v` implement SPEC §11.1. The output side is
+pin-centric — each of the 16 output-capable pins carries a 4-bit field naming
+the one driver that drives it, so two machines cannot contend for a pin. Inputs
+are the same shape. One 105-bit chain holds the assignment and the `run` flag.
+
+`tb/test_chip.py` configures the chip the way a host actually would: five
+machines over `ui_in` with machine select on `uio_in[7:5]`, then the
+pin-assignment chain, then `run`. Then it checks, every cycle, each machine
+against its own model **and** each assigned driver on its assigned pin.
+
+```
+machines started 2 cycles after run
+5 machines through the TT boundary for 2000 cycles,
+  no divergence and every assigned pin correct
+output pins used: [0,1,2,3,4,5,6,8,9]   input pins used: [0,1,2,3,4]
+```
+
+The assignment is deliberately **not** the identity, and splits by drive mode:
+open-drain slots to `uio` (SPEC §11 — a `uo_out` pin is always driven and cannot
+release a net, so I²C would not work there), push-pull to `uo_out`, packed in
+use-order within each group. That exercises all three output behaviours the spec
+distinguishes, including `uio_oe` on an open-drain release.
+
+### Five bugs, and where they lived
+
+Three were in the RTL, all in the gap between "the machines work" and "a host
+can bring the chip up" — none reachable from `test_multi.py`, which drives the
+array directly and never touches the chain or the boundary:
+
+1. **`run` taken from the shift register's MSB.** New bits enter at the MSB, so
+   `run` flickered with the data and the first `1` in the chain gated off
+   `sel_ld_en` and froze the load permanently. It is now bit 0, sent first, so it
+   arrives exactly on the final shift. In silicon this would have made the chip
+   unconfigurable.
+2. **Machines started before their inputs were valid.** `run` is the last bit of
+   the chain, so `ui_in` carries chain data right up to the moment it goes high.
+   `uart_rx` read a chain bit as a UART start bit. `stt_chip` now releases the
+   pins on `run` and enables the machines two cycles later, so §8.3 is satisfied
+   by construction.
+3. **`uo_out[0]` aliases loader busy only while `run` is low.** A real host
+   constraint, now in §11.1.
+
+Two were in the testbench: the host byte interface was not driven, and `ui_in`
+was set *before* stepping the model rather than after. The second is subtle —
+invisible for any machine reading an external driver, and caught only by I²C,
+because I²C reads the same wires it drives.
+
 ## Running the tests
 
 Everything needs LibreLane's devshell (iverilog, yosys) plus the cocotb venv:
@@ -352,6 +404,8 @@ failing run.
 | `stt_array.v` | NSM independent machines |
 | `check_slope.py` | the flop-slope gate |
 | `tb/test_multi.py` | five machines, five programs, all in lockstep |
+| `stt_iomux.v`, `stt_chip.v` | SPEC 11.1: pin assignment and the run flag |
+| `tb/test_chip.py` | the TT boundary, configured through the pins |
 | `stt_config.v` | the SPEC §2 configuration list as one serial chain |
 | `stt_top.v` | the three wired together; the unit the testbench drives |
 | `tb/lockstep.py` | benchmark capture and the configuration bit map |

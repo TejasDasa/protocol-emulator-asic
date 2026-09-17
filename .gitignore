@@ -76,3 +76,4 @@ rtl2/sim_build_multi/
 rtl2/slope_*.log
 rtl2/.synth_array.resolved.ys
 rtl2/.synth_cfgmem.resolved.ys
+rtl2/sim_build_chip/

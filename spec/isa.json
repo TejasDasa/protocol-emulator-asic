@@ -41,7 +41,8 @@
       {"name": "ui_in",  "width": 8, "index": "0-7",  "out": false, "in": true}
     ],
     "config_mode_pins": [
-      {"pin": "ui_in[3:0]",  "role": "imem, palette, config and pin-select load enables"},
+      {"pin": "ui_in[2:0]",  "role": "load enables: imem, configuration, pin assignment"},
+      {"pin": "ui_in[3]",    "role": "reserved"},
       {"pin": "ui_in[4]",    "role": "serial load data"},
       {"pin": "ui_in[6:5]",  "role": "host TX write and RX read strobes"},
       {"pin": "uio_in[7:5]", "role": "state-machine select for the load chains"}

@@ -900,7 +900,8 @@ While `run` = 0, these pins carry control and are not available to the iomux:
 
 | pin           | role while `run` = 0                              |
 |---------------|---------------------------------------------------|
-| `ui_in[3:0]`  | imem, palette, config and pin-select load enables |
+| `ui_in[2:0]`  | load enables: imem, configuration, pin assignment |
+| `ui_in[3]`    | reserved                                          |
 | `ui_in[4]`    | serial load data                                  |
 | `ui_in[6:5]`  | host TX write and RX read strobes                 |
 | `uio_in[7:5]` | state-machine select for the load chains          |
@@ -915,17 +916,36 @@ consumed permanently, leaving `uo_out[7:0]` plus `uio[4:0]` — **13
 output-capable pins for 15 drivers**. Five machines with three slots each would
 not fit on the boundary at all. With it, 15 drivers have 16 pins.
 
-**CURRENT BEHAVIOUR — the structural RTL does not implement this.**
-`rtl/stt_iomux.v` implements the output side as specified above: a per-pin
-select field, `NSM * NSLOT : 1` muxes on data and output enable, loaded as a
-shift chain. It does **not** implement the input side that way. Inputs are a
-fixed tap — machine *m* reads `ui_in[2m]` and `ui_in[2m+1]`, wrapping into
-`uio_in` once that runs past 8 — which at five machines gives machine 4
-`uio_in[1:0]` and collides with the control pins above. There is also no `run`
-flag: `rtl/stt_chip.v` decodes `ui_in[6:0]` and `uio_in[7:5]` as control
-unconditionally, so a protocol driving `ui_in[0]` high during operation would
-start an instruction-memory load. **Both are specification changes the RTL has
-yet to make, not descriptions of it.** See §16.
+**SPECIFIED — the machines start two cycles after `run`, not on it.** Setting
+`run` releases the pins to the iomux immediately; the machines are enabled two
+cycles later. This is how §8.3's two-cycle input-stability requirement is met
+**by construction** rather than being an obligation the host can forget.
+
+It cannot be met any other way. `run` is the last bit of the pin-assignment
+chain, so `ui_in` is carrying chain data right up to the moment it goes high and
+the input synchronizers are full of it. Without the delay a machine's first row
+acts on leftover configuration traffic — `uart_rx` read a chain bit as a start
+bit and took its branch on cycle 0.
+
+**SPECIFIED — `uo_out[0]` reports loader busy while `run` is low.** The boundary
+has no spare pin for the busy signal §10 requires the host to honour, and before
+`run` the iomux outputs are meaningless because no assignment has been loaded.
+So `uo_out` carries loader status until `run` goes high, after which the iomux
+owns all 16 pins. A host must not read `uo_out[0]` as busy once `run` is set: it
+is then whichever driver pin 0 selects, which for a machine idling high reads 1
+forever.
+
+**IMPLEMENTED in `rtl2/stt_iomux.v` and `rtl2/stt_chip.v`**, and verified
+through the pins by `rtl2/tb/test_chip.py`: five machines configured over
+`ui_in` with machine select on `uio_in[7:5]`, then the pin-assignment chain,
+then `run`, then 1200 cycles with every machine checked against its own model
+and every assigned driver checked on its assigned pin.
+
+`rtl/stt_iomux.v` is the older measurement harness and does NOT implement this.
+Its inputs are a fixed tap — machine *m* reads `ui_in[2m]` and `ui_in[2m+1]`,
+wrapping into `uio_in` past 8, which at five machines gives machine 4
+`uio_in[1:0]` and collides with the control pins — and `rtl/stt_chip.v` has no
+`run` flag at all. See §16.
 
 ---
 

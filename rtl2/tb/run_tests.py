@@ -40,6 +40,7 @@ def sources_and_top():
     instruction memory in CFGMEM_IHP16 macros.
     """
     multi = os.environ.get("MULTI", "0") == "1"
+    chip  = os.environ.get("CHIP", "0") == "1"
     if os.environ.get("IMEM", "behavioural") == "cfgmem":
         base = ("cfgmem_ihp16_model.v", "stt_config.v", "stt_imem_cfgmem.v",
                 "stt_core.v", "stt_top_cfgmem.v")
@@ -47,7 +48,10 @@ def sources_and_top():
     else:
         base = ("stt_config.v", "stt_imem.v", "stt_core.v", "stt_top.v")
         top = "stt_top"
-    if multi:
+    if chip:
+        base = base + ("stt_array.v", "stt_iomux.v", "stt_chip.v")
+        top = "stt_chip"
+    elif multi:
         base = base + ("stt_array.v",)
         top = "stt_array"
     return ([os.path.join(RTL, s) for s in base], top)
