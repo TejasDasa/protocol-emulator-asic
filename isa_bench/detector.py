@@ -92,10 +92,10 @@ class TogglerDriver:
     relationship to the assumed baud. Seeded, so the run is reproducible.
     """
 
-    def __init__(self, net, period, seed=1234, t0=40):
+    def __init__(self, net, period, seed=1234, t0=40, phase=0.0):
         import random
         rng = random.Random(seed)
-        self.net, self.t0 = net, t0
+        self.net, self.t0 = net, t0 + int(round(phase))
         self.grid = period
         self.bits = [rng.randrange(2) for _ in range(4000)]
 
@@ -115,8 +115,8 @@ class SquareDriver:
     no idle level, which is exactly what the signature tests for.
     """
 
-    def __init__(self, net, half, t0=40):
-        self.net, self.half, self.t0 = net, half, t0
+    def __init__(self, net, half, t0=40, phase=0.0):
+        self.net, self.half, self.t0 = net, half, t0 + int(round(phase))
 
     def step(self, w):
         if w.t < self.t0:
@@ -176,12 +176,12 @@ def run_detect(kind, P=32, prog_override=None, phase=0.0, jitter=0.0, seed=None)
         w.devices = [ConstDriver("rx", 0)]
         limit = 60 * P
     elif kind == "random":
-        w.devices = [TogglerDriver("rx", P)]
+        w.devices = [TogglerDriver("rx", P, phase=phase)]
         limit = 200 * P
     elif kind == "square":
         # Deliberately NOT at the candidate baud: an SPI clock has no reason to
         # match the baud a detector is hypothesising. See "square_aligned".
-        w.devices = [SquareDriver("rx", (P * 2) // 3)]
+        w.devices = [SquareDriver("rx", (P * 2) // 3, phase=phase)]
         limit = 200 * P
     elif kind == "square_aligned":
         # A square wave at EXACTLY the candidate baud. This is expected to be
@@ -189,7 +189,7 @@ def run_detect(kind, P=32, prog_override=None, phase=0.0, jitter=0.0, seed=None)
         # 1,0,1,0 across the data bits, high at bit 9 -- a well-formed frame
         # carrying 0x55, repeating forever. A real UART receiver would decode it
         # as 0x55 and be right. The ambiguity is in the signal, not the detector.
-        w.devices = [SquareDriver("rx", P)]
+        w.devices = [SquareDriver("rx", P, phase=phase)]
         limit = 200 * P
     else:
         raise ValueError(kind)
@@ -216,7 +216,9 @@ PHASES = (0.0, 0.17, 0.33, 0.5, 0.67, 0.83)
 def check_all(prog_override=None, P=32, phases=PHASES, jitter=0.0):
     """True if the detector gets every case right at every phase."""
     for kind, want in CASES:
-        for frac in (phases if kind.startswith("uart") else (0.0,)):
+        # Every kind, including the negatives: a detector that rejects noise
+        # at one alignment and accepts it at another is not rejecting it.
+        for frac in phases:
             try:
                 n, _, errs = run_detect(kind, P, prog_override=prog_override,
                                         phase=frac * P, jitter=jitter,
