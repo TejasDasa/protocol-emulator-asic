@@ -210,9 +210,12 @@ cfg = {
     # PSM-0069 fails on VPWR connectivity even though the geometry is verified
     # covered (verify_macro_power.py). Disabling it is what lets streamout, the
     # signoff DRC and LVS run at all; the geometric check stands in for it.
-    "RUN_IRDROP_REPORT": not SIGNOFF,
-    "RUN_KLAYOUT_DRC": SIGNOFF,
-    "RUN_MAGIC_DRC": SIGNOFF,
+    # SIGNOFF: 0 = IR drop only (the default sweep), 1 = signoff DRC/LVS with
+    # IR drop OFF, which is how signoff was reached while PSM-0069 blocked it,
+    # 2 = everything on, which is what a fixed PDN annotation should allow.
+    "RUN_IRDROP_REPORT": SIGNOFF != 1,
+    "RUN_KLAYOUT_DRC": SIGNOFF >= 1,
+    "RUN_MAGIC_DRC": SIGNOFF >= 1,
     "RUN_LINTER": 0,
     "meta": {"flow": "Classic",
              "substituting_steps": {
