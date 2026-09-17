@@ -187,7 +187,11 @@ class SttCore:
                 self.link = self.p.index[r.f]
             nxt = self.link if target == "ret" else self.p.index[target]
         else:
-            nxt = self.p.index[r.f]
+            # SPEC section 5: target 255 means return, and in SKIP mode the
+            # target field feeds the FALSE exit. Resolving "ret" only on the
+            # true exit raised KeyError on a row no reference program happens to
+            # contain; the rule is the same on either exit.
+            nxt = self.link if r.f == "ret" else self.p.index[r.f]
         self.row = nxt
         if new_t is not None:
             self.tcount = new_t

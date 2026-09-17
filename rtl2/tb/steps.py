@@ -106,6 +106,21 @@ async def run_lockstep(dut, core, w, done, max_cycles, label, nslots, words, cov
     Returns (cycles, finished). Raises Divergence on the first mismatch.
     """
     w.resolve()
+
+    # Give the model the same synchronizer lag the RTL has, for the first two
+    # cycles.
+    #
+    # World.read_sync falls back to the net's CURRENT value while the history is
+    # shorter than the synchronizer depth, so for cycles 0 and 1 the model sees
+    # an input with ZERO lag. Hardware cannot: SPEC section 8.3 specifies two
+    # cycles, and the RTL flops are primed with the idle level during the load
+    # sequence. Seeding the history with two idle samples makes the model lag
+    # the same way. Without this the two disagree on cycle 0 whenever a device
+    # drives a pin on cycle 0 -- four of sixty random programs did.
+    for nname, n in w.nets.items():
+        if not w.history[nname]:
+            w.history[nname].extend([n.value] * w.sync)
+
     cycles = 0
     finished = False
 
@@ -124,6 +139,15 @@ async def run_lockstep(dut, core, w, done, max_cycles, label, nslots, words, cov
         # Combinational outputs are valid now, before the edge ending the cycle.
         await settle(dut)
         executed = i_(dut.dbg_row, "dbg_row")
+        # The word the RTL is about to execute must be the word we loaded at
+        # that address. Checked on every cycle of every suite, so the serial
+        # load path and the read path are under test continuously and not only
+        # in tb/test_imem.py.
+        rtl_word = i_(dut.row, "row")
+        if rtl_word != words[executed]:
+            raise Divergence(
+                f"{label}: cycle {t}: imem read at address {executed} gives "
+                f"0x{rtl_word:08x}, loaded 0x{words[executed]:08x}")
         if cov is not None:
             cov.record(words[executed])
         # Snapshot the internals that decide THIS cycle, before the edge. Reading
@@ -183,8 +207,8 @@ async def run_lockstep(dut, core, w, done, max_cycles, label, nslots, words, cov
                     f"{label}: cycle {t}: {f} differs -- RTL {rtl[f]} "
                     f"(0x{rtl[f]:x}) vs model {mdl[f]} (0x{mdl[f]:x})\n"
                     f"  full RTL   {rtl}\n  full model {mdl}\n"
-                    f"  RTL row word 0x{i_(dut.row):08x} at addr {executed}, "
-                    f"expected 0x{words[executed]:08x}\n"
+                    f"  row executed: addr {executed}, word 0x{words[executed]:08x} "
+                    f"(RTL read {pre['row']})\n"
                     f"  tx_ne={tx_ne} tx_pop={rtl_tx_pop} rx_push={rtl_rx_push}")
 
         popped = tx_before - len(w.tx_fifo)

@@ -148,6 +148,24 @@ That bug also exposed a hole in the testbench: an X in the DUT was being caught
 as "model raised ... not comparable, skipped". A test that skips on X cannot fail
 on X, so `steps.py` now treats a non-0/1 read as a named failure.
 
+### The directed load-path test
+
+All three lockstep suites load the program through the same serial path, so they
+do exercise it — but they visit whatever rows the program branches to, and
+nothing guarantees all 32 addresses are ever read. `tb/test_imem.py` writes six
+patterns (zeros, ones, walking-one, walking-zero, alternating, and a
+distinct-per-row pattern that catches a row written to the *wrong address*) and
+walks the row pointer across every address, reading back through the real read
+path. **192 address reads across 6 patterns.**
+
+It matters most for what comes next. Replacing the behavioural array with two
+`CFGMEM_IHP16` macros introduces a one-hot `WROW` write decode that the
+behavioural model does not need — new logic, in the one place all three suites
+are blind, because they all load through it identically.
+
+Separately, `tb/steps.py` now checks on **every cycle of every suite** that the
+word the RTL is about to execute is the word that was loaded at that address.
+
 ## Synthesis
 
 Against `sg13cmos5l_stdcell_typ_1p20V_25C`: **1197 flops**, chip area
@@ -217,16 +235,31 @@ failing run.
 | `stt_top.v` | the three wired together; the unit the testbench drives |
 | `tb/lockstep.py` | benchmark capture and the configuration bit map |
 | `tb/test_lockstep.py` | the cocotb test |
-| `tb/run_tests.py` | runs all six and fails properly |
+| `tb/steps.py` | the lockstep loop, shared by every suite |
+| `tb/test_mutants.py` | mutation against the RTL |
+| `tb/test_random.py`, `tb/randprog.py` | random 32-row programs |
+| `tb/test_imem.py` | directed load-path test, all 32 addresses |
+| `tb/coverage.py`, `tb/coverage_util.py` | encoding coverage |
+| `tb/run_tests.py`, `run_mutants.py`, `run_random.py`, `run_imem.py` | runners that fail properly |
 | `dump_programs.py` | encodes the six programs; used to check `RET` placement |
 
-## One thing the spec leaves open, and why it does not bite
+## Three things this work moved out of SPEC §16
 
-SPEC §5 says target 255 means return. `SttCore` only resolves `ret` on the
-**true** exit, but in `SKIP` mode the target field feeds the **false** exit, so a
-`SKIP` row with target 255 would be a spec/model disagreement — the model would
-raise `KeyError`. This RTL implements the spec's general rule: `RET` applies to
-whichever exit the target field feeds. `dump_programs.py` confirms **no row in
-any of the six reference programs puts 255 on a false exit**, so the case is
-unreachable and the lockstep result is unaffected. Worth knowing before someone
-writes a seventh program.
+Each was an open item that an implementer would have had to guess at. All three
+are now normative, because the RTL pins them down and a suite tests them.
+
+**`load` on an empty TX FIFO** (§9). The shift register holds and no byte is
+popped. Found by mutation; §16.1 previously said "hardware behaviour is
+undefined."
+
+**What the input synchronizer holds after reset** (§8.3). Both stages reset to 0,
+so inputs read low for two cycles, and a machine must not be enabled until its
+inputs have been stable that long — which the load sequence guarantees. The model
+gives itself zero lag on cycles 0 and 1, which hardware cannot; `tb/steps.py`
+seeds the history so it lags the same way.
+
+**`RET` on a false exit** (§5). `RET` applies to whichever exit the target field
+feeds, which in `SKIP` is the false exit. `SttCore` resolved it only on the true
+exit and raised `KeyError`; it now applies the same rule to either. No reference
+program contains such a row, which is why it survived — it is reachable only from
+a program nobody had written.

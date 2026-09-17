@@ -53,12 +53,11 @@ def random_words(rng, nrows=NROWS, p_ret=0.08):
     words = []
     for i in range(nrows):
         mode = rng.randrange(4)
-        # RET is deliberately NOT generated on SKIP. SPEC section 5 says target
-        # 255 means return, but SttCore resolves 'ret' only on the TRUE exit
-        # while SKIP feeds the target field to the FALSE exit, so the model
-        # would raise KeyError. That disagreement is recorded in rtl2/README.md;
-        # generating it here would test the model's limitation, not the RTL.
-        if mode in (0, 1) and rng.random() < p_ret:
+        # RET is generated on every mode, including SKIP, where SPEC section 5
+        # feeds the target field to the FALSE exit. SttCore used to raise
+        # KeyError on that row because it resolved "ret" only on the true exit;
+        # it now applies the same rule to either exit, so the case is testable.
+        if rng.random() < p_ret:
             target = RET
         else:
             target = rng.randrange(nrows)

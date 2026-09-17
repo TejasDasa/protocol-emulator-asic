@@ -111,7 +111,7 @@
     {"name": "sr", "lsb": 0, "width": 3, "description": "Shift register. At most one choice per row.",
      "choices": [
        {"code": 0, "actions": [],                 "description": "No shift-register action."},
-       {"code": 1, "actions": ["load"],           "description": "Load a byte popped from the TX FIFO."},
+       {"code": 1, "actions": ["load"],           "description": "Load a byte popped from the TX FIFO. On an EMPTY TX FIFO the shift register holds its value and no byte is popped."},
        {"code": 2, "actions": ["loadk"],          "description": "Load the configured constant K."},
        {"code": 3, "actions": ["loadcrc"],        "description": "Load the complement of the CRC register, 5 bits."},
        {"code": 4, "actions": ["clr"],            "description": "Clear to zero."},

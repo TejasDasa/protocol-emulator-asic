@@ -224,6 +224,18 @@ register. The link register is written by the `call` action (§6), which stores
 reachable. An 8-bit target reaches every row with the return encoding to spare;
 no row is unreachable.
 
+**SPECIFIED — `RET` applies to whichever exit the target field feeds.** In
+`WAIT` and `BRANCH` that is the true exit; in `SKIP` it is the **false** exit, so
+a `SKIP` row with target 255 returns when its test *fails*. In `STEP` the target
+field is unused and 255 has no meaning. The rule is the field's, not the exit's.
+
+`SttCore` resolved `ret` only on the true exit until 2026-09-16 and raised
+`KeyError` on a `SKIP` row with target 255; it now applies the same rule to
+either exit. No reference program contains such a row, which is why the gap
+survived: it is reachable only from a program nobody had written. The random
+program suite in `rtl2/tb/` generates `RET` on all four modes and the RTL and
+the model agree.
+
 **SPECIFIED — `next`, including from the last row.**
 
 <!-- BEGIN GENERATED: next-row-rule -->
@@ -259,16 +271,16 @@ fixed palette and the 8 loadable entries described there do not exist.
 
 **Group `sr`** — row bits [21:19], group-local [2:0]. Shift register. At most one choice per row.
 
-| code | actions        | meaning                                                              |
-|------|----------------|----------------------------------------------------------------------|
-| 0    | —              | No shift-register action.                                            |
-| 1    | `load`         | Load a byte popped from the TX FIFO.                                 |
-| 2    | `loadk`        | Load the configured constant K.                                      |
-| 3    | `loadcrc`      | Load the complement of the CRC register, 5 bits.                     |
-| 4    | `clr`          | Clear to zero.                                                       |
-| 5    | `shift`        | Shift one place in the configured direction, inserting the fill bit. |
-| 6    | `clr`, `shift` | Clear then shift.                                                    |
-| 7    | `push`         | Push the shift register to the RX FIFO.                              |
+| code | actions        | meaning                                                                                                            |
+|------|----------------|--------------------------------------------------------------------------------------------------------------------|
+| 0    | —              | No shift-register action.                                                                                          |
+| 1    | `load`         | Load a byte popped from the TX FIFO. On an EMPTY TX FIFO the shift register holds its value and no byte is popped. |
+| 2    | `loadk`        | Load the configured constant K.                                                                                    |
+| 3    | `loadcrc`      | Load the complement of the CRC register, 5 bits.                                                                   |
+| 4    | `clr`          | Clear to zero.                                                                                                     |
+| 5    | `shift`        | Shift one place in the configured direction, inserting the fill bit.                                               |
+| 6    | `clr`, `shift` | Clear then shift.                                                                                                  |
+| 7    | `push`         | Push the shift register to the RX FIFO.                                                                            |
 
 **Group `c1`** — row bits [24:22], group-local [5:3]. Counter 1. At most one choice per row.
 
@@ -505,6 +517,22 @@ Measured, not asserted: driving an input high at cycle 5 makes the net read 1
 from cycle 5, the core's test read 1 from cycle 7, and the resulting row change
 take effect for cycle 8. Traced to `World.read_sync` with `sync=2`.
 
+**SPECIFIED — what the synchronizer holds after reset.** Both stages reset to 0,
+so every input reads **0 for the first two cycles** after reset deasserts,
+whatever the pin is actually doing. An implementation must therefore not enable a
+state machine until its inputs have been stable for at least two cycles. In
+practice that is free: a machine cannot run until its configuration and program
+have been shifted in, which takes hundreds of cycles, by which time the
+synchronizer has long since tracked the pins.
+
+The Python model does not model this. `World.read_sync` falls back to the net's
+*current* value while its history is shorter than the synchronizer depth, which
+gives the model **zero lag on cycles 0 and 1** — something hardware cannot do.
+The two agree from cycle 2 onward. `rtl2/tb/steps.py` seeds the history with two
+idle samples so the model lags the same way; without it, four of sixty random
+programs disagreed on cycle 0 with the RTL, in every case because a device drove
+a pin on cycle 0.
+
 **SPECIFIED.** This applies to `in0h`, `in0l`, `in1h`, `in1l`, and to the `fill`
 configuration when it selects input 0 as the shift-in source. It does not apply
 to `fifo`, `cz`, `c2z`, `srbit` or `tmr`, which read internal state.
@@ -649,10 +677,16 @@ implementation is not mistaken for drift. An implementation that omits the two
 wider units is not violating this specification; one that includes them must
 use these codes. See §16.
 
-**CURRENT BEHAVIOUR — FIFOs.** The models use unbounded queues, so no depth is
-specified. `load` on an empty TX FIFO raises an error in the model
-(`"stt: load from empty FIFO"`); what hardware does is not specified. `push`
-onto a full RX FIFO is not modelled at all. See §16.
+**SPECIFIED — `load` on an empty TX FIFO.** The shift register **holds its
+value** and **no byte is popped**. The row is otherwise unaffected: its other
+actions and its pin operation still happen, and the branch still resolves. The
+model records an error for the programmer's benefit (`"stt: load from empty
+FIFO"`) but changes no state, and the RTL does the same. Found by the mutation
+suite in `rtl2/tb/`, which reached the case through a corrupted `uart_tx` that
+drains the FIFO faster than it refills.
+
+**CURRENT BEHAVIOUR — FIFO depth.** The models use unbounded queues, so no depth
+is specified, and `push` onto a full RX FIFO is not modelled at all. See §16.
 
 ---
 
@@ -985,8 +1019,7 @@ and where the evidence stops.
 | item | what is missing | where |
 |---|---|---|
 | **Timer width** | `tcount` is an unbounded integer in the models. The structural RTL uses 16 bits. Must cover the required reload period `P`. | §2, §8.4 |
-| **FIFO depth** | The models use unbounded queues. No depth, and no behaviour for `push` onto a full RX FIFO. | §2, §9 |
-| **`load` from an empty TX FIFO** | The model raises an error; hardware behaviour is undefined. | §9 |
+| **FIFO depth** | The models use unbounded queues. No depth, and no behaviour for `push` onto a full RX FIFO. `load` on an empty TX FIFO is now specified (§9). | §2, §9 |
 | **Test codes 11–15** | Unassigned. The models would raise on decode. Code 10 and pin op code 7 are now reserved (§9). | §4, §7 |
 | **A 33rd row in hardware** | The toolchain rejects it. The structural RTL's 5-bit write pointer wraps and overwrites row 0. | §12 |
 | **Live reprogramming** | §11.1 specifies that the `run` flag is cleared only by `rst_n`, so reprogramming means asserting reset. What a machine does on the first cycle after a reload short of reset is still undefined. | §10, §11.1 |
