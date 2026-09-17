@@ -25,6 +25,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge
 
 from lockstep import CFG_BITS, capture_benchmark, config_word, encode_rows
+from pinmap import PinPlan
 from steps import PERIOD_NS, Divergence, i_, settle
 
 STT_ROWS = 32
@@ -142,19 +143,18 @@ async def chip_lockstep(dut):
             nxt_i += 1
     assert nxt_i <= 8, f"{nxt_i} inputs in use, only 8 ui_in pins"
 
-    sel = 1                            # bit 0 = run, and it is sent FIRST
+    # The chain comes from the checked builder, so the assignment these five
+    # programs run under is one isa_bench/pinmap.py would accept -- and every
+    # one of them uses `fifo`, `load` or `push`, so it would be REJECTED
+    # without the host port below.
+    plan = PinPlan()
     for pin, drv in out_map.items():
-        sel |= drv << (1 + pin * OSELW)
+        plan.drive(drv // NSLOT, drv % NSLOT, pin, od=drv_od[drv])
     for (k, i), pin in in_pin.items():
-        sel |= pin << (1 + OBITS + (k * NIN + i) * ISELW)
-    assert nxt_od <= HOST_DOUT_PIN, (
-        f"open-drain slots reached pin {nxt_od - 1}, colliding with the host "
-        f"port's output pin {HOST_DOUT_PIN}")
-    sel |= HOST_CODE << (1 + HOST_DOUT_PIN * OSELW)
-    sel |= 1 << O_HEN
-    sel |= HOST_STB_PIN << (O_HEN + 1)
-    sel |= HOST_DIN_PIN << (O_HEN + 1 + ISELW)
-    NSEL = O_HEN + 1 + 2 * ISELW
+        plan.read(k, i, pin)
+    plan.host_port(HOST_DOUT_PIN, HOST_STB_PIN, HOST_DIN_PIN)
+    sel, NSEL = plan.chain([m["core"].p for m in machines]
+                           + [None] * (NSM - len(machines)))
 
     cocotb.start_soon(Clock(dut.clk, PERIOD_NS, unit="ns").start())
     dut.ena.value = 1

@@ -1,0 +1,53 @@
+--- /mnt/c/temp/pesync/odb_stripes.py	2026-09-17 16:27:15.010931200 -0500
++++ floorplan/odb_stripes.py	2026-09-17 16:28:00.517294446 -0500
+@@ -469,6 +469,50 @@
+                     added += 1
+         print(f"[INFO] {net_name}: {len(stripes)} tile stripes kept, {added} full-height stripes added over macro pin columns")
+         tidy(net_name, swire, bpin, rails)
++        annotate(net_name, net)
++
++
++
++def annotate(net_name, net):
++    """Record the macro power connections in the database, not just in geometry.
++
++    Drawing a stripe over a macro pin connects it physically; it does not tell
++    the database they are connected. pdngen writes that association itself when
++    it builds a macro grid, but a single-layer PDN cannot use a macro grid (see
++    README), so this step draws the stripes instead -- and has to write the
++    association too, or every check that reads the database rather than the
++    layout disagrees with the layout.
++
++    Without this: `design__critical_disconnected_pin__count` counts one macro
++    per net, LVS reports the two power pins unmatched with every net and device
++    matching, and `OpenROAD.IRDropReport` fails `PSM-0069 Check connectivity
++    failed on VPWR` -- a check that `ERROR_ON_DISCONNECTED_PINS` cannot
++    suppress because it lives in a different step.
++    """
++    block = net.getBlock()
++    wanted = {net_name} | set(SRAM_PINS.get(net_name, ()))
++    joined = 0
++    for inst in block.getInsts():
++        master = inst.getMaster()
++        if not master.isBlock():
++            continue
++        for mterm in master.getMTerms():
++            if mterm.getName() not in wanted:
++                continue
++            iterm = inst.findITerm(mterm.getName())
++            if iterm is None or iterm.getNet() is not None:
++                continue
++            try:
++                iterm.connect(net)
++            except (AttributeError, TypeError):
++                odb.dbITerm_connect(iterm, net)
++            try:
++                iterm.setSpecial()
++            except AttributeError:
++                pass
++            joined += 1
++    print(f"[INFO] {net_name}: {joined} macro power pins connected in the database")
++
+ 
+ 
+ if __name__ == "__main__":

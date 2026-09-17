@@ -151,13 +151,34 @@ the typical corner. The `obs` observability port XOR-reduces signals from every
 state machine into one pin, and `clk` has a fanout of 1,844 — both are artifacts
 of a module written to measure area, not to be taped out.
 
-**The flow stopped before signoff DRC.** `OpenROAD.IRDropReport` failed with
+**`OpenROAD.IRDropReport` fails, and signoff is reachable without it.**
 `PSM-0069, Check connectivity failed on VPWR`, on full-height Metal4 stripes
 that `ExtendPowerStripes` added over the macro pin columns. This is the same ODB
 annotation gap as the disconnected-pin caveat, hitting a check that cannot be
-suppressed the same way. `pdn_test` passed this step with 2 macros and 5
-machines do not. **Magic and KLayout DRC therefore never ran**, so `route__drc_errors = 0`
-is the router's own check, not signoff DRC.
+suppressed the same way. `pdn_test` passes this step with 2 macros; 10 macros do
+not, in either format.
+
+It blocks IR-drop analysis specifically, not the rest of signoff. Re-running with
+`RUN_IRDROP_REPORT` off and `RUN_MAGIC_DRC`/`RUN_KLAYOUT_DRC` on (the `SIGNOFF=1`
+path in `gen_config.py`) completes the flow:
+
+| metric | value |
+|---|---|
+| `magic__drc_error__count` | **0** |
+| `klayout__drc_error__count` | **0** |
+| `design__lvs_error__count` | **2** |
+| `design__lvs_unmatched_pin__count` | 2 — `VPWR` and `VGND` |
+| `design__lvs_net_difference__count` | 0 |
+| `design__lvs_device_difference__count` | 0 |
+| `design__lvs_unmatched_device__count` | 0 |
+| `design__lvs_unmatched_net__count` | 0 |
+| `design__critical_disconnected_pin__count` | 10 — exactly one per macro |
+| `design__disconnected_pin__count` | 20 — `VPWR` and `VGND` on each |
+
+So signoff DRC is clean and LVS fails on nothing but the two power pins, with
+every net and device matching. That is the annotation gap and not a wiring
+fault — but it is still an LVS failure, and an LVS failure is still not
+submittable.
 
 ### What this answers and what it does not
 

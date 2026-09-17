@@ -550,6 +550,39 @@ row costs exactly one core clock cycle**, whether or not its test passes.
 
 A failing test therefore changes nothing except the row pointer and the timer.
 
+### 8.1.1 What the no-stall rule forbids
+
+**SPECIFIED — nothing a row can invoke may be shared between state machines.**
+This follows from §8.1 alone and is stated here because it has already been
+rediscovered twice, each time as a surprise.
+
+A row costs exactly one cycle. A resource shared by N machines can be reached by
+N rows on the same cycle, and serving them needs arbitration; arbitration means
+at least one machine waits; §8.1 leaves nowhere for that wait to go. There is no
+stall signal in this architecture, no back-pressure into the row sequencer, and
+no way for a row to take two cycles. So the only shareable thing is something no
+row can reach.
+
+The test is mechanical. **If any row field can invoke it, it replicates.**
+
+| reached by | example | consequence |
+|---|---|---|
+| an action | `push`, `load`, `crc16step`, `stuffrst` | per machine |
+| a test | `fifo`, `stall` | per machine |
+| a pin op | `crcb` | per machine |
+| configuration only | the period `P`, the CRC polynomial | may be per machine for other reasons, but not for this one |
+| the host, between machines | the pin assignment chain, the loader | may be shared |
+
+Where it has bitten: the TX and RX FIFOs are per machine because `fifo` is a
+test and `push` and `load` are actions (§9), and the wide CRC and the bit
+stuffer are per machine because `crc16step`, `stall` and `crcb` reach them
+(§9). Both were first priced as single shared blocks, and both cost the machine
+count instead. A third instance should not be a surprise.
+
+This is a rule about **state machines**, not about the chip. The host byte port
+of §11.2 is shared by all five machines and is not a counterexample: no row can
+invoke it. A row reaches its own FIFO, and the port reaches the FIFOs.
+
 ### 8.2 Ordering that programs can observe
 
 **SPECIFIED.** Two consequences of §8.1 that a program can rely on:
@@ -658,7 +691,8 @@ This section used to be called "shared units", because `crc_lfsr16.v` and
 floorplan instantiates one of each for the whole chip. That is not implementable
 and the name was wrong.
 
-Sharing is ruled out by §8.1, not by cost. Both units hold per-stream state — the
+Sharing is ruled out by §8.1.1, not by cost, and by the general rule stated
+there rather than by anything specific to these two units. Both units hold per-stream state — the
 CRC register and the stuffer's run length and last bit — and two machines
 emitting bits into one stuffer would interleave into a single run counter and
 corrupt each other's stuffing. Serializing access needs arbitration, and
@@ -1301,7 +1335,8 @@ and where the evidence stops.
 | **D is bigger than C, and faster** | Synthesis at five machines: D 189,435 µm² and 1862 flops, against C's 152,039 µm² and 1565. `docs/row-format-decision.md` §2 predicted the opposite, because it priced the §9 units as shared; they cannot be (§9). Timing went the other way: C missed 50 MHz post-route by −1.266 ns, D makes it by +1.678 ns, which is what removing the palette lookup from the critical path buys. |
 | **Signoff slew and capacitance** | Not clean. 26 max-slew violations at the slow corner (3 typ, 0 fast) and 7 max-capacitance violations at every corner, post-route on the five-machine D design. Routing and timing are clean; these are not. |
 | **Every physical result describes configuration C** | Superseded for the five-machine point by the row above, and still true of everything else on record. `floorplan/gen_config.py` takes a tree argument: C generates `stt_chip_cfgmem.v` from `rtl/stt_chip.v`, the 21-bit palette format, and D hardens `tt_um_stt` from `rtl2/`. What those runs establish is a property of the physical problem and carries over: ten macros of this size place on the grid, a design of roughly this cell count routes at five machines and not at six, and the timing regime is post-route setup −1.266 ns at the slow corner (about 47 MHz) with hold met at every corner (§14). What does NOT carry over is D's own critical paths and D's own congestion. D's per-machine logic is smaller than C's (`docs/row-format-decision.md` §2), so the substitution is conservative in the direction that matters, but it is a substitution. **No `rtl2` design has ever been hardened.** |
-| **Signoff DRC and LVS** | Not clean. The five-machine C design fails LVS with `VPWR`/`VGND` fragmented into disconnected pieces (`design__lvs_error__count` 2, all signal counts zero), and the flow stopped at IR-drop analysis on a plugin connectivity gap (`floorplan/README.md`). Not submittable as it stands. |
+| **Signoff DRC and LVS** | Signoff DRC is **clean**: `magic__drc_error__count` 0 and `klayout__drc_error__count` 0 on the five-machine C design. LVS reports exactly **2 errors, both unmatched pins**, with `lvs_net_difference` 0, `lvs_device_difference` 0, `lvs_unmatched_device` 0 and `lvs_unmatched_net` 0. The two are `VPWR` and `VGND`. Nothing about the extracted circuit differs — only the two power pins fail to match, which is the signature of the annotation gap below and not of a wiring fault. |
+| **`PSM-0069` blocks IR-drop analysis** | `OpenROAD.IRDropReport` fails `Check connectivity failed on VPWR` on both C and D at ten macros, and passes at two (`pdn_test`). The `ExtendPowerStripes` plugin draws the Metal4 stripes that pdngen trims back around macros, but never writes the ODB `iterm`-to-net annotation pdngen would have, so a database-level check sees pins the geometry says are covered. `design__critical_disconnected_pin__count` is exactly one per macro (2 at two macros, 10 at ten) and `design__disconnected_pin__count` exactly two (`VPWR` and `VGND` each). Signoff DRC and LVS are reachable by disabling the IR-drop step, which is how the numbers above were obtained — so this blocks IR-drop analysis specifically, not the whole signoff flow. It is an upstream defect and is owed an upstream issue. |
 | **Device-model edge alignment** | Every device model in `isa_bench/` drives its waveform from a fixed start time on an integer-cycle grid, so a machine's timer and the traffic it observes are in a **deterministic phase relationship by construction**. Nothing produces arbitrary edge phase or jitter. This affects every timing result in the repository, including the SPI and I²C minimum-phase assertions of §8: those check a phase is long enough, on waveforms aligned to the machine by construction. Found concretely — a mutation removing the `thalf` mid-bit alignment from the UART detector survives *every* case, because without it the free-running timer lands usably by luck rather than by design (`isa_bench/DETECTOR_NOTES.md`). Arbitrary phase and jitter in the device models is needed for RTL verification regardless, and this mutant is the concrete proof it is missing. |
 | **Inter-pin skew** | The model has no pin path. Skew between a clock and its data — SCK/MOSI, SCL/SDA — is the failure mode that matters in silicon and is entirely unmeasured. |
 | **Multi-state-machine floorplan** | SETTLED at five, in both formats. C and D each place and route ten macros and five machines with zero router DRC errors. Six fails global routing in both: in D it finishes with **2,846 GCells of overflow** (Metal2 1,973 at 50.2% usage, Metal3 664 at 54.1%, Metal4 209 at 13.1%), against C's failure at far lower layer usage. D is larger per machine than C (§9), so six was never going to come back — and it did not. **Five machines is the answer, measured in the format that ships.** |

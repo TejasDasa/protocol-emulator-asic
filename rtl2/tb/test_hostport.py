@@ -27,6 +27,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge
 
 from lockstep import CFG_BITS, config_word
+from pinmap import PinPlan
 from steps import PERIOD_NS, i_, settle
 
 STT_ROWS = 32
@@ -102,17 +103,16 @@ async def idle(dut, n):
 async def hostport(dut):
     core, words = echo_program()
 
-    # Pin assignment: every pin takes driver 0 except DOUT_PIN, which takes the
-    # free code 15 and so carries the host port instead of a machine.
-    sel = 1                                    # bit 0 = run, sent first
-    for pin in range(NOUT):
-        drv = HOST_CODE if pin == DOUT_PIN else 0
-        sel |= drv << (1 + pin * OSELW)
-    # machine inputs all read ui_in[0]; the echo program tests none of them
-    sel |= 1 << O_HEN                          # host_en
-    sel |= STB_PIN << (O_HEN + 1)
-    sel |= DIN_PIN << (O_HEN + 1 + ISELW)
-    nsel = O_HEN + 1 + 2 * ISELW
+    # Pin assignment through the checked builder (isa_bench/pinmap.py), which
+    # would refuse this plan if the echo program moved bytes and no pin
+    # selected the host port.
+    plan = PinPlan()
+    plan.drive(ECHO_SM, 0, 0)
+    for m in range(NSM):
+        for i in range(NIN):
+            plan.read(m, i, 0)
+    plan.host_port(dout_pin=DOUT_PIN, stb_pin=STB_PIN, din_pin=DIN_PIN)
+    sel, nsel = plan.chain([core.p] + [None] * (NSM - 1))
 
     cocotb.start_soon(Clock(dut.clk, PERIOD_NS, unit="ns").start())
     dut.ena.value = 1
