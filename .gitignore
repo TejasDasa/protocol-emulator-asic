@@ -72,3 +72,7 @@ rtl2/tb/__pycache__/
 rtl2/.synth.resolved.ys
 rtl2/synth.log
 rtl2/programs.json
+rtl2/sim_build_multi/
+rtl2/slope_*.log
+rtl2/.synth_array.resolved.ys
+rtl2/.synth_cfgmem.resolved.ys

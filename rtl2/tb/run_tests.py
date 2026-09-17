@@ -34,15 +34,23 @@ PDK_V = os.environ.get(
 
 
 def sources_and_top():
-    """(verilog sources, toplevel) for the selected imem implementation."""
+    """(verilog sources, toplevel) for the selected configuration.
+
+    MULTI=1 builds the NSM-machine array; IMEM=cfgmem puts each machine's
+    instruction memory in CFGMEM_IHP16 macros.
+    """
+    multi = os.environ.get("MULTI", "0") == "1"
     if os.environ.get("IMEM", "behavioural") == "cfgmem":
-        return ([os.path.join(RTL, s) for s in
-                 ("cfgmem_ihp16_model.v", "stt_config.v", "stt_imem_cfgmem.v",
-                  "stt_core.v", "stt_top_cfgmem.v")],
-                "stt_top_cfgmem")
-    return ([os.path.join(RTL, s) for s in
-             ("stt_config.v", "stt_imem.v", "stt_core.v", "stt_top.v")],
-            "stt_top")
+        base = ("cfgmem_ihp16_model.v", "stt_config.v", "stt_imem_cfgmem.v",
+                "stt_core.v", "stt_top_cfgmem.v")
+        top = "stt_top_cfgmem"
+    else:
+        base = ("stt_config.v", "stt_imem.v", "stt_core.v", "stt_top.v")
+        top = "stt_top"
+    if multi:
+        base = base + ("stt_array.v",)
+        top = "stt_array"
+    return ([os.path.join(RTL, s) for s in base], top)
 
 
 # kept for callers that only need the plain list

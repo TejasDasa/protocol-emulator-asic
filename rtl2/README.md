@@ -247,6 +247,58 @@ gets all 16. Hence the full-load rule: the host loads all 32 rows, padding.
 all load through the same path and visit only rows a program branches to. The
 directed test exists for exactly this, and it found every one of these.
 
+## Replication: five machines
+
+`stt_array.v` instantiates NSM machines. Replication and nothing else — each has
+its own imem, configuration register and core, and they share only the clock,
+the reset and the serial load data. There is deliberately **no iomux, no run
+flag and no shared host FIFO yet**: pins and host bytes come out per machine,
+flattened, so independence can be proven before anything is shared.
+
+`-DIMEM_MACRO` selects the CFGMEM-backed machine; the port lists are identical
+by construction, so only the module name changes.
+
+### Independence is the thing being tested
+
+The failure mode for replication is not that a machine computes the wrong
+answer. It is that machines are **not independent**: a load reaching the wrong
+one, or instances synthesis merged because they were never given different
+state. This project has already made that error once — every machine received
+the same serial stream, held identical state, and Yosys merged them, understating
+per-machine cost by ~180 flops (`docs/area-study.md`).
+
+So `tb/test_multi.py` does not run one program five times. It loads a
+**different** reference program into each machine, gives each its own `SttCore`
+and its own `World`, and compares all five against their own models on every
+cycle:
+
+```
+5 machines in lockstep for 2500 cycles, no divergence:
+  uart_tx(5r), uart_rx(8r), spi(8r), i2c(22r), jtag(25r)
+```
+
+Passes with both memories. A machine disturbed by its neighbour, or a load that
+addressed the wrong one, diverges immediately and the failure names which
+machine and which field.
+
+### The flop slope gate
+
+The structural counterpart. N machines must cost exactly N times one machine:
+
+| NSM | flops | expected | area (µm²) |
+|---|---|---|---|
+| 1 | 1196 | — | 94,646 |
+| 2 | 2392 | 2392 ✓ | 189,306 |
+| 5 | **5980** | 5980 ✓ | 472,778 |
+
+Verified in the failing direction: replacing the per-machine load select with a
+constant makes five machines cost **5580** rather than 5980 — merging would
+quietly cost 80 flops per machine — and `check_slope.py` exits 1.
+
+Area is very slightly sub-linear (5 x 94,646 = 473,232 against 472,778 measured)
+because the machines share the `sm_sel` decode. Flops are exactly linear, which
+is the property that matters for detecting merged state.
+
 ## Running the tests
 
 Everything needs LibreLane's devshell (iverilog, yosys) plus the cocotb venv:
@@ -297,6 +349,9 @@ failing run.
 | `stt_imem_cfgmem.v` | the same, driving two `CFGMEM_IHP16` macros |
 | `cfgmem_ihp16_model.v` | simulation model of the macro; synthesis uses the real one |
 | `stt_top_cfgmem.v` | top with the macro-backed memory |
+| `stt_array.v` | NSM independent machines |
+| `check_slope.py` | the flop-slope gate |
+| `tb/test_multi.py` | five machines, five programs, all in lockstep |
 | `stt_config.v` | the SPEC §2 configuration list as one serial chain |
 | `stt_top.v` | the three wired together; the unit the testbench drives |
 | `tb/lockstep.py` | benchmark capture and the configuration bit map |

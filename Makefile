@@ -253,4 +253,21 @@ rtl2-mutants:
 	@cd rtl2 && $(COCOTB_PY) tb/run_mutants.py
 rtl2-random:
 	@cd rtl2 && $(COCOTB_PY) tb/run_random.py
-rtl2-full: rtl2-isa-check rtl2-latch rtl2-test rtl2-mutants rtl2-random
+rtl2-full: rtl2-isa-check rtl2-latch rtl2-test rtl2-mutants rtl2-random rtl2-multi rtl2-slope
+
+# Replication: NSM independent machines. rtl2-multi loads a DIFFERENT reference
+# program into each and checks every one against its own model each cycle, so a
+# load reaching the wrong machine or instances that leaked cannot pass.
+# rtl2-slope is the structural counterpart: N machines must cost exactly N times
+# one machine, or synthesis merged them (docs/area-study.md).
+.PHONY: rtl2-multi rtl2-slope
+rtl2-multi:
+	@cd rtl2 && $(COCOTB_PY) tb/run_multi.py
+	@cd rtl2 && IMEM=cfgmem $(COCOTB_PY) tb/run_multi.py
+
+rtl2-slope: lib-check
+	@cd rtl2 && for n in 1 2 5; do \
+	   NSM=$$n LIB=$(LIB) bash run_synth_array.sh > slope_$$n.log 2>&1 || \
+	     { echo "array synthesis failed at NSM=$$n"; exit 1; }; \
+	 done
+	@cd rtl2 && python3 check_slope.py slope_1.log slope_2.log slope_5.log

@@ -1,0 +1,30 @@
+# stt_array at NSM machines, behavioural memories.
+#
+#
+# The number that matters is the FLOP SLOPE. Each machine is 1197 flops with the
+# behavioural memory (213 with the macros), so N machines must be exactly N times
+# that. Anything less means synthesis merged
+# instances -- which is a real error this project has already made once, when
+# every machine received the same serial load stream and ended up holding
+# identical state (docs/area-study.md). The per-machine load select exists to
+# prevent it and this is the check that it does.
+read_verilog -I. -sv stt_config.v stt_imem.v stt_core.v stt_top.v stt_array.v
+# Yosys 0.69: chparam -set BEFORE hierarchy, not hierarchy -chparam.
+log "NSM=@NSM@"
+chparam -set NSM @NSM@ stt_array
+hierarchy -top stt_array -check
+proc
+opt_clean
+select -assert-none t:$dlatch
+select -assert-none t:$_DLATCH_*
+log "GATE: no inferred latches in stt_array"
+flatten -noscopeinfo
+opt -full
+memory
+opt -full
+techmap
+opt -full
+dfflibmap -liberty @LIB@
+abc -liberty @LIB@
+opt_clean
+stat -liberty @LIB@
