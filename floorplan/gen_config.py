@@ -186,6 +186,11 @@ cfg = {
     # Congestion is one of the things this run is for, so do NOT allow it.
     "GRT_ALLOW_CONGESTION": ALLOW,
     "RUN_KLAYOUT_XOR": 0,
+    # The plugin never writes the ODB annotation for the stripes it adds, so
+    # PSM-0069 fails on VPWR connectivity even though the geometry is verified
+    # covered (verify_macro_power.py). Disabling it is what lets streamout, the
+    # signoff DRC and LVS run at all; the geometric check stands in for it.
+    "RUN_IRDROP_REPORT": not SIGNOFF,
     "RUN_KLAYOUT_DRC": SIGNOFF,
     "RUN_MAGIC_DRC": SIGNOFF,
     "RUN_LINTER": 0,

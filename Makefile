@@ -184,6 +184,8 @@ spec:
 	@python3 spec/conformance.py
 
 check: spec-check
+	@$(MAKE) --no-print-directory rtl2-isa-check
+	@$(MAKE) --no-print-directory rtl2-latch
 	@$(MAKE) --no-print-directory check-freeze
 	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
 	@for r in $(COMB_RUNS); do \
@@ -209,3 +211,37 @@ clean:
 check-freeze:
 	@cd isa_bench && python3 sharedunits.py >/dev/null && echo "OK: freeze intact (reserved codes fit, all benchmarks bit-identical)"
 	@cd isa_bench && python3 nextrow.py | tail -1
+
+# ---------------------------------------------------------------- rtl2
+# The implementation of the frozen ISA. rtl/ is the previous format's
+# measurement harness and is left alone so the area study stays reproducible.
+.PHONY: rtl2-isa-check rtl2-latch rtl2-test rtl2
+
+# The decode constants are generated from spec/isa.json for the same reason the
+# encoding tables in docs/SPEC.md are: a hand-copied constant is a silent
+# divergence waiting to happen.
+rtl2-isa-check:
+	@python3 rtl2/gen_isa_vh.py --check
+
+# Fails on ANY inferred latch. An accidental latch in the section 8.1 datapath,
+# which is almost entirely combinational, is the classic way a design that
+# simulates correctly fails in silicon. Verified in both directions: deleting
+# the default assignment in the pin-op block makes this fail with
+# "Assertion failed: selection is not empty: t:$$dlatch".
+rtl2-latch: lib-check
+	@LIB=$(LIB) bash rtl2/run_synth.sh > rtl2/synth.log 2>&1 || \
+	  { echo "rtl2 LATCH GATE FAILED; see rtl2/synth.log"; \
+	    grep -E "Latch inferred|Assertion failed" rtl2/synth.log | head -5; exit 1; }
+	@grep -q "no inferred latches" rtl2/synth.log || \
+	  { echo "rtl2: latch gate did not run"; exit 1; }
+	@echo "OK: rtl2 has no inferred latches"
+	@grep -E "Chip area for module" rtl2/synth.log | tail -1
+
+# Cycle-exact lockstep against the authoritative models. Needs cocotb and a
+# simulator, so it is a separate target: see rtl2/README.md for the environment.
+rtl2-test:
+	@cd rtl2 && $(COCOTB_PY) tb/run_tests.py
+
+rtl2: rtl2-isa-check rtl2-latch rtl2-test
+
+COCOTB_PY ?= python3
