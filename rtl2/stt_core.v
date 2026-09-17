@@ -59,6 +59,17 @@ module stt_core #(
     input  wire [NSLOT-1:0]   cfg_init_pins,
     input  wire [NSLOT-1:0]   cfg_od_mask,
 
+    // SPEC section 9 wider shared units. Both are configuration, not row
+    // fields: a program picks a polynomial and a stuffing rule once, the way
+    // it picks a period.
+    input  wire [15:0]        cfg_crc16_poly,
+    input  wire [4:0]         cfg_crc16_width,
+    input  wire               cfg_crc16_reflect,
+    input  wire               cfg_crc16_seed_ones,
+    input  wire [3:0]         cfg_stuff_n,        // 0 disables the stuffer
+    input  wire               cfg_stuff_ones,     // count 1s only (USB), not runs
+    input  wire [NSLOT-1:0]   cfg_stuff_slots,    // which slots route through it
+
     // host byte interface
     input  wire [SR_W-1:0]    tx_data,
     input  wire               tx_ne,       // TX FIFO not empty -> the `fifo` test
@@ -79,6 +90,11 @@ module stt_core #(
     output wire [TIMER_W-1:0] dbg_tcount,
     output wire [ADDR_W-1:0]  dbg_link,
     output wire [NSLOT-1:0]   dbg_pinv
+,
+    output wire [15:0]        dbg_crc16,
+    output wire [3:0]         dbg_stuff_run,
+    output wire               dbg_stuff_last,
+    output wire               dbg_stuff_valid
 );
 
   // ---- architectural state (SPEC section 2) ------------------------------
@@ -90,6 +106,12 @@ module stt_core #(
   reg [4:0]         crc;
   reg [TIMER_W-1:0] tcount;
   reg [NSLOT-1:0]   pinv;
+  reg [15:0]        crc16;
+  // The model's stuffer holds `stuff_last = None` before the first bit, which
+  // is a third state, not a value. `stuff_valid` is that None.
+  reg [3:0]         stuff_run;
+  reg               stuff_last;
+  reg               stuff_valid;
 
   // ---- input synchronizer (SPEC section 8.3): two cycles ----------------
   reg [NIN-1:0] sync0, sync1;
@@ -134,6 +156,9 @@ module stt_core #(
   wire act_crcrst  = (a_xx == `STT_AXX_CRCRST) || (a_xx == `STT_AXX_CRCRST_CALL);
   wire act_crcstep = (a_xx == `STT_AXX_CRCSTEP);
   wire act_call    = (a_xx == `STT_AXX_CALL)   || (a_xx == `STT_AXX_CRCRST_CALL);
+  wire act_crc16rst  = (a_xx == `STT_AXX_CRC16RST);
+  wire act_crc16step = (a_xx == `STT_AXX_CRC16STEP);
+  wire act_stuffrst  = (a_xx == `STT_AXX_STUFFRST);
 
   // ---- shift register width and serial bit ------------------------------
   wire [SR_W:0]   mask_ext = ({{SR_W{1'b0}}, 1'b1} << cfg_sr_width) - 1'b1;
@@ -156,6 +181,44 @@ module stt_core #(
     end
   endfunction
 
+  // ---- SPEC section 9 wider units: geometry -----------------------------
+  // The wide CRC is a Galois LFSR of configurable width. `reflect` picks the
+  // direction: reflected CRCs shift right and feed back from bit 0, MSB-first
+  // CRCs shift left and feed back from the top bit of the configured width.
+  wire [16:0]      c16_mask_ext = (17'd1 << cfg_crc16_width) - 1'b1;
+  wire [15:0]      c16_mask     = c16_mask_ext[15:0];
+  wire [3:0]       c16_msb      = cfg_crc16_width[3:0] - 4'd1;
+  wire [15:0]      crc16_seed   = cfg_crc16_seed_ones ? c16_mask : 16'd0;
+
+  function automatic [15:0] crc16_adv;
+    input [15:0] c;
+    input        b;
+    input [15:0] poly;
+    input [15:0] m;
+    input [3:0]  msb;
+    input        reflect;
+    reg          fb;
+    begin
+      if (reflect) begin
+        fb = c[0] ^ b;
+        crc16_adv = fb ? (((c >> 1) ^ poly) & m) : ((c >> 1) & m);
+      end else begin
+        fb = c[msb] ^ b;
+        crc16_adv = fb ? (((c << 1) ^ poly) & m) : ((c << 1) & m);
+      end
+    end
+  endfunction
+
+  // The stuffer will insert rather than accept when the run it has already
+  // seen has reached the threshold. `stall_pre` is the TEST's view, on state
+  // as it stands at the start of the cycle; `stall_mid` is the PIN OP's view,
+  // after `stuffrst` has had its chance in step 3. They differ on exactly the
+  // rows that reset the stuffer and drive a pin in the same cycle, which is
+  // how a CAN trailer is sent.
+  wire stall_pre = (cfg_stuff_n != 4'd0) && stuff_valid
+                && !(cfg_stuff_ones && !stuff_last)
+                && (stuff_run >= cfg_stuff_n);
+
   // ---- step 1: the timer tick, before anything else ---------------------
   wire tick = (tcount == {TIMER_W{1'b0}});
 
@@ -174,7 +237,8 @@ module stt_core #(
       `STT_T_IN0L:   test_pass = ~in_s[0];
       `STT_T_IN1H:   test_pass =  in_s[1];
       `STT_T_IN1L:   test_pass = ~in_s[1];
-      default:       test_pass = 1'b0;   // codes 10-15 unassigned (SPEC section 4)
+      `STT_T_STALL:  test_pass = stall_pre;
+      default:       test_pass = 1'b0;   // codes 11-15 unassigned (SPEC section 4)
     endcase
   end
   wire fire = en & test_pass;
@@ -206,6 +270,30 @@ module stt_core #(
     else if (act_crcstep) crc_next = crc_stepped;
     else                  crc_next = crc;
   end
+
+  // crc16: crc16rst then crc16step, both after the loads and before `shift`,
+  // so crc16step sees the same serial bit crcstep does (SPEC section 8.2).
+  reg [15:0] crc16_mid;
+  always @* begin
+    if      (act_crc16rst)  crc16_mid = crc16_seed;
+    else if (act_crc16step) crc16_mid = crc16_adv(crc16, srbit_mid,
+                                                  cfg_crc16_poly, c16_mask,
+                                                  c16_msb, cfg_crc16_reflect);
+    else                    crc16_mid = crc16;
+  end
+
+  // `stuffrst` is an ACTION, so it lands before the pin op sees the stuffer.
+  wire [3:0] stuff_run_mid   = act_stuffrst ? 4'd0 : stuff_run;
+  wire       stuff_last_mid  = act_stuffrst ? 1'b0 : stuff_last;
+  wire       stuff_valid_mid = act_stuffrst ? 1'b0 : stuff_valid;
+  wire stall_mid = (cfg_stuff_n != 4'd0) && stuff_valid_mid
+                && !(cfg_stuff_ones && !stuff_last_mid)
+                && (stuff_run_mid >= cfg_stuff_n);
+  // The model's run counter is a Python int and never wraps. Saturating here
+  // is observationally identical, because nothing reads the count except the
+  // comparison against cfg_stuff_n, which is at most 15.
+  wire [3:0] stuff_run_inc = (stuff_run_mid == 4'hF) ? 4'hF
+                                                    : stuff_run_mid + 1'b1;
 
   // shift, after crcstep.
   wire fill_bit = (cfg_fill == 2'd0) ? 1'b0
@@ -239,31 +327,83 @@ module stt_core #(
   end
 
   // ---- step 4: the pin op, which sees sr_next ---------------------------
+  // This is also where the bit stuffer sits. A slot named in cfg_stuff_slots
+  // does not necessarily emit the bit the row asked for: when the stuffer is
+  // stalling it substitutes the complement of the last bit and consumes
+  // nothing. That is the whole reason the `stall` test exists -- the program
+  // asks first, and holds its shift register if the answer is yes.
   wire srbit_post = srbit_of(sr_next, cfg_shift_left, msb_idx);
+
+  // crcb drives a pin from the wide CRC and advances it, so the shift-out is
+  // part of the pin op rather than of step 3.
+  wire        crc16_out_bit = cfg_crc16_reflect ? crc16_mid[0]
+                                                : crc16_mid[c16_msb];
+  wire [15:0] crc16_shifted = cfg_crc16_reflect ? ((crc16_mid >> 1) & c16_mask)
+                                                : ((crc16_mid << 1) & c16_mask);
+
   reg [NSLOT-1:0] pinv_next;
+  reg             crcb_used;
+  reg             want, has_want, emit;
+  reg [3:0]       stuff_run_next;
+  reg             stuff_last_next, stuff_valid_next;
   always @* begin
-    pinv_next = pinv;
+    pinv_next        = pinv;
+    crcb_used        = 1'b0;
+    want             = 1'b0;
+    has_want         = 1'b0;
+    emit             = 1'b0;
+    stuff_run_next   = stuff_run_mid;
+    stuff_last_next  = stuff_last_mid;
+    stuff_valid_next = stuff_valid_mid;
     if (f_slot == `STT_SLOT_PAIR) begin
+      // The pair is differential and does not route through the stuffer,
+      // matching SttCore.step.
       case (f_pinop)
-        `STT_P_LO:  begin pinv_next[0] = 1'b0;        pinv_next[1] = 1'b0;        end
-        `STT_P_HI:  begin pinv_next[0] = 1'b1;        pinv_next[1] = 1'b1;        end
-        `STT_P_SR:  begin pinv_next[0] = srbit_post;  pinv_next[1] = ~srbit_post; end
-        `STT_P_TGL: begin pinv_next[0] = ~pinv[0];    pinv_next[1] = ~pinv[1];    end
-        `STT_P_D0:  begin pinv_next[0] = 1'b0;        pinv_next[1] = 1'b1;        end
-        `STT_P_D1:  begin pinv_next[0] = 1'b1;        pinv_next[1] = 1'b0;        end
-        default:    ;                                 // hold
+        `STT_P_LO:   begin pinv_next[0] = 1'b0;        pinv_next[1] = 1'b0;        end
+        `STT_P_HI:   begin pinv_next[0] = 1'b1;        pinv_next[1] = 1'b1;        end
+        `STT_P_SR:   begin pinv_next[0] = srbit_post;  pinv_next[1] = ~srbit_post; end
+        `STT_P_TGL:  begin pinv_next[0] = ~pinv[0];    pinv_next[1] = ~pinv[1];    end
+        `STT_P_D0:   begin pinv_next[0] = 1'b0;        pinv_next[1] = 1'b1;        end
+        `STT_P_D1:   begin pinv_next[0] = 1'b1;        pinv_next[1] = 1'b0;        end
+        `STT_P_CRCB: begin pinv_next[0] = crc16_out_bit;
+                           pinv_next[1] = crc16_out_bit;
+                           crcb_used    = 1'b1;                                   end
+        default:     ;                                 // hold
       endcase
     end else begin
+      has_want = 1'b1;
       case (f_pinop)
-        `STT_P_LO:  pinv_next[f_slot] = 1'b0;
-        `STT_P_HI:  pinv_next[f_slot] = 1'b1;
-        `STT_P_SR:  pinv_next[f_slot] = srbit_post;
-        `STT_P_TGL: pinv_next[f_slot] = ~pinv[f_slot];
+        `STT_P_LO:   want = 1'b0;
+        `STT_P_HI:   want = 1'b1;
+        `STT_P_SR:   want = srbit_post;
+        `STT_P_TGL:  want = ~pinv[f_slot];
+        `STT_P_CRCB: begin want = crc16_out_bit; crcb_used = 1'b1; end
         // hold, and d0/d1 on a single slot: no write (SPEC section 7).
-        default:    ;
+        default:     has_want = 1'b0;
       endcase
+      if (has_want) begin
+        if (cfg_stuff_slots[f_slot]) begin
+          if (stall_mid) begin
+            emit             = ~stuff_last_mid;
+            stuff_run_next   = 4'd1;
+            stuff_last_next  = emit;
+            stuff_valid_next = 1'b1;
+          end else begin
+            emit             = want;
+            stuff_run_next   = (stuff_valid_mid && (want == stuff_last_mid))
+                                 ? stuff_run_inc : 4'd1;
+            stuff_last_next  = want;
+            stuff_valid_next = 1'b1;
+          end
+        end else begin
+          emit = want;
+        end
+        pinv_next[f_slot] = emit;
+      end
     end
   end
+
+  wire [15:0] crc16_next = crcb_used ? crc16_shifted : crc16_mid;
 
   // ---- step 5: the next row (SPEC section 5) ----------------------------
   // `next` wraps mod 32 from row 31.
@@ -318,6 +458,17 @@ module stt_core #(
       crc    <= 5'h1F;
       tcount <= {TIMER_W{1'b0}};
       pinv   <= {NSLOT{1'b1}};
+      // Cleared, not seeded: before the host has loaded the configuration
+      // there is no seed to load. The seed arrives in the !en branch below,
+      // which is synchronous and runs for the whole load. Resetting to
+      // crc16_seed here instead makes this the only register in the design
+      // with a non-constant asynchronous reset, which yosys maps to 16
+      // $_ALDFFE_PNP_ async-load flops that the sg13cmos5l library has no
+      // cell for.
+      crc16       <= 16'd0;
+      stuff_run   <= 4'd0;
+      stuff_last  <= 1'b0;
+      stuff_valid <= 1'b0;
     end else if (!en) begin
       // Held in reset-like state while the host loads. The timer takes its
       // reset value of P-1 from the configuration as it arrives.
@@ -329,6 +480,10 @@ module stt_core #(
       crc    <= 5'h1F;
       tcount <= period_m1;
       pinv   <= cfg_init_pins;
+      crc16       <= crc16_seed;
+      stuff_run   <= 4'd0;
+      stuff_last  <= 1'b0;
+      stuff_valid <= 1'b0;
     end else begin
       rowp   <= row_next;
       link   <= link_next;
@@ -336,6 +491,10 @@ module stt_core #(
       cnt    <= test_pass ? cnt_next  : cnt;
       c2     <= test_pass ? c2_next   : c2;
       crc    <= test_pass ? crc_next  : crc;
+      crc16       <= test_pass ? crc16_next        : crc16;
+      stuff_run   <= test_pass ? stuff_run_next    : stuff_run;
+      stuff_last  <= test_pass ? stuff_last_next   : stuff_last;
+      stuff_valid <= test_pass ? stuff_valid_next  : stuff_valid;
       tcount <= tcount_next;
       pinv   <= test_pass ? pinv_next : pinv;
     end
@@ -354,6 +513,10 @@ module stt_core #(
   assign dbg_tcount = tcount;
   assign dbg_link   = link;
   assign dbg_pinv   = pinv;
+  assign dbg_crc16       = crc16;
+  assign dbg_stuff_run   = stuff_run;
+  assign dbg_stuff_last  = stuff_last;
+  assign dbg_stuff_valid = stuff_valid;
 
 endmodule
 `default_nettype wire

@@ -41,6 +41,11 @@ module stt_top_cfgmem #(
     output wire [TIMER_W-1:0] dbg_tcount,
     output wire [ADDR_W-1:0]  dbg_link,
     output wire [NSLOT-1:0]   dbg_pinv
+,
+    output wire [15:0]        dbg_crc16,
+    output wire [3:0]         dbg_stuff_run,
+    output wire               dbg_stuff_last,
+    output wire               dbg_stuff_valid
 );
 
   wire [ROW_W-1:0]   row;
@@ -51,6 +56,12 @@ module stt_top_cfgmem #(
   wire [CNT_W-1:0]   cfg_cload_a, cfg_cload_b, cfg_cload_c, cfg_c2load;
   wire [SR_W-1:0]    cfg_loadk;
   wire [NSLOT-1:0]   cfg_init_pins, cfg_od_mask;
+  wire [15:0]        cfg_crc16_poly;
+  wire [4:0]         cfg_crc16_width;
+  wire               cfg_crc16_reflect, cfg_crc16_seed_ones;
+  wire [3:0]         cfg_stuff_n;
+  wire               cfg_stuff_ones;
+  wire [NSLOT-1:0]   cfg_stuff_slots;
 
   stt_config #(.TIMER_W(TIMER_W), .SR_W(SR_W), .CNT_W(CNT_W), .NSLOT(NSLOT))
   u_cfg (
@@ -61,7 +72,12 @@ module stt_top_cfgmem #(
       .cfg_cload_a(cfg_cload_a), .cfg_cload_b(cfg_cload_b),
       .cfg_cload_c(cfg_cload_c), .cfg_c2load(cfg_c2load),
       .cfg_loadk(cfg_loadk), .cfg_init_pins(cfg_init_pins),
-      .cfg_od_mask(cfg_od_mask)
+      .cfg_od_mask(cfg_od_mask),
+      .cfg_crc16_poly(cfg_crc16_poly), .cfg_crc16_width(cfg_crc16_width),
+      .cfg_crc16_reflect(cfg_crc16_reflect),
+      .cfg_crc16_seed_ones(cfg_crc16_seed_ones),
+      .cfg_stuff_n(cfg_stuff_n), .cfg_stuff_ones(cfg_stuff_ones),
+      .cfg_stuff_slots(cfg_stuff_slots)
   );
 
   stt_imem_cfgmem #(.ROW_W(ROW_W), .ROWS(ROWS), .ADDR_W(ADDR_W))
@@ -83,11 +99,18 @@ module stt_top_cfgmem #(
       .cfg_cload_c(cfg_cload_c), .cfg_c2load(cfg_c2load),
       .cfg_loadk(cfg_loadk), .cfg_init_pins(cfg_init_pins),
       .cfg_od_mask(cfg_od_mask),
+      .cfg_crc16_poly(cfg_crc16_poly), .cfg_crc16_width(cfg_crc16_width),
+      .cfg_crc16_reflect(cfg_crc16_reflect),
+      .cfg_crc16_seed_ones(cfg_crc16_seed_ones),
+      .cfg_stuff_n(cfg_stuff_n), .cfg_stuff_ones(cfg_stuff_ones),
+      .cfg_stuff_slots(cfg_stuff_slots),
       .tx_data(tx_data), .tx_ne(tx_ne), .tx_pop(tx_pop),
       .rx_data(rx_data), .rx_push(rx_push),
       .pin_in(pin_in), .pin_out(pin_out), .pin_oe(pin_oe),
       .dbg_sr(dbg_sr), .dbg_cnt(dbg_cnt), .dbg_c2(dbg_c2), .dbg_crc(dbg_crc),
-      .dbg_tcount(dbg_tcount), .dbg_link(dbg_link), .dbg_pinv(dbg_pinv)
+      .dbg_tcount(dbg_tcount), .dbg_link(dbg_link), .dbg_pinv(dbg_pinv),
+      .dbg_crc16(dbg_crc16), .dbg_stuff_run(dbg_stuff_run),
+      .dbg_stuff_last(dbg_stuff_last), .dbg_stuff_valid(dbg_stuff_valid)
   );
 
 endmodule

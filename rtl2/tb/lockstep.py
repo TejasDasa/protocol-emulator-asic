@@ -37,7 +37,15 @@ O_C2     = O_CC + CNT_W
 O_K      = O_C2 + CNT_W
 O_INIT   = O_K + SR_W
 O_OD     = O_INIT + NSLOT
-CFG_BITS = O_OD + NSLOT
+# SPEC section 9 wider units, appended (see stt_config.v).
+O_C16P   = O_OD + NSLOT
+O_C16W   = O_C16P + 16
+O_C16R   = O_C16W + 5
+O_C16S   = O_C16R + 1
+O_STN    = O_C16S + 1
+O_STO    = O_STN + 4
+O_STS    = O_STO + 1
+CFG_BITS = O_STS + NSLOT
 
 FILL_CODE = {"0": 0, "1": 1, "in0": 2}
 
@@ -67,6 +75,16 @@ def config_word(core):
         if mode == "od":
             od |= 1 << i
     put(O_OD, NSLOT, od)
+    put(O_C16P, 16, core.crc16_poly)
+    put(O_C16W, 5, core.crc16_w)
+    put(O_C16R, 1, 1 if core.crc16_reflect else 0)
+    put(O_C16S, 1, 1 if core.crc16_seed_ones else 0)
+    put(O_STN, 4, core.stuff_n)
+    put(O_STO, 1, 1 if core.stuff_ones else 0)
+    stuff = 0
+    for i in core.stuff_slots:
+        stuff |= 1 << i
+    put(O_STS, NSLOT, stuff)
     return v
 
 
@@ -88,6 +106,11 @@ def capture_benchmark(name, period):
     try:
         import detector
         detector.register()
+    except ImportError:
+        pass
+    try:
+        import can_prog
+        can_prog.register()
     except Exception:
         pass
 

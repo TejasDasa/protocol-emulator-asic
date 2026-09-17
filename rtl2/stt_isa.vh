@@ -31,6 +31,7 @@
 `define STT_T_IN1L    4'd7
 `define STT_T_SRBIT   4'd8
 `define STT_T_TMR     4'd9
+`define STT_T_STALL   4'd10
 
 // ---- branch modes ----
 `define STT_M_WAIT    2'd0
@@ -52,6 +53,7 @@
 `define STT_P_TGL   3'd4
 `define STT_P_D0    3'd5
 `define STT_P_D1    3'd6
+`define STT_P_CRCB  3'd7
 
 // ---- action groups: one `define per (group, choice) ----
 // group sr: 3 bits at row bit 0 of the action field
@@ -92,5 +94,8 @@
 `define STT_AXX_CRCSTEP      3'd2
 `define STT_AXX_CALL         3'd3
 `define STT_AXX_CRCRST_CALL  3'd4
+`define STT_AXX_CRC16RST     3'd5
+`define STT_AXX_CRC16STEP    3'd6
+`define STT_AXX_STUFFRST     3'd7
 
 `endif

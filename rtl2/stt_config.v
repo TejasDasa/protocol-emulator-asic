@@ -31,10 +31,22 @@ module stt_config #(
     output wire [CNT_W-1:0]   cfg_c2load,
     output wire [SR_W-1:0]    cfg_loadk,
     output wire [NSLOT-1:0]   cfg_init_pins,
-    output wire [NSLOT-1:0]   cfg_od_mask     // 1 = open drain (SPEC section 7)
+    output wire [NSLOT-1:0]   cfg_od_mask,    // 1 = open drain (SPEC section 7)
+
+    // SPEC section 9 wider shared units. APPENDED to the field map below, for
+    // the same reason the encoding appends: the host's bit order is a
+    // contract, and inserting here would silently re-map every existing field.
+    output wire [15:0]        cfg_crc16_poly,
+    output wire [4:0]         cfg_crc16_width,
+    output wire               cfg_crc16_reflect,
+    output wire               cfg_crc16_seed_ones,
+    output wire [3:0]         cfg_stuff_n,
+    output wire               cfg_stuff_ones,
+    output wire [NSLOT-1:0]   cfg_stuff_slots
 );
 
-  localparam integer NBITS = TIMER_W + 1 + 2 + 4 + 4*CNT_W + SR_W + 2*NSLOT;
+  localparam integer NBITS = TIMER_W + 1 + 2 + 4 + 4*CNT_W + SR_W + 2*NSLOT
+                           + 16 + 5 + 1 + 1 + 4 + 1 + NSLOT;
 
   reg [NBITS-1:0] cfg;
   always @(posedge clk or negedge rst_n) begin
@@ -56,6 +68,13 @@ module stt_config #(
   localparam integer O_K      = O_C2     + CNT_W;
   localparam integer O_INIT   = O_K      + SR_W;
   localparam integer O_OD     = O_INIT   + NSLOT;
+  localparam integer O_C16P   = O_OD     + NSLOT;
+  localparam integer O_C16W   = O_C16P   + 16;
+  localparam integer O_C16R   = O_C16W   + 5;
+  localparam integer O_C16S   = O_C16R   + 1;
+  localparam integer O_STN    = O_C16S   + 1;
+  localparam integer O_STO    = O_STN    + 4;
+  localparam integer O_STS    = O_STO    + 1;
 
   assign cfg_period     = cfg[O_PERIOD +: TIMER_W];
   assign cfg_shift_left = cfg[O_SHIFT];
@@ -68,6 +87,14 @@ module stt_config #(
   assign cfg_loadk      = cfg[O_K    +: SR_W];
   assign cfg_init_pins  = cfg[O_INIT +: NSLOT];
   assign cfg_od_mask    = cfg[O_OD   +: NSLOT];
+
+  assign cfg_crc16_poly      = cfg[O_C16P +: 16];
+  assign cfg_crc16_width     = cfg[O_C16W +: 5];
+  assign cfg_crc16_reflect   = cfg[O_C16R];
+  assign cfg_crc16_seed_ones = cfg[O_C16S];
+  assign cfg_stuff_n         = cfg[O_STN  +: 4];
+  assign cfg_stuff_ones      = cfg[O_STO];
+  assign cfg_stuff_slots     = cfg[O_STS  +: NSLOT];
 
 endmodule
 `default_nettype wire

@@ -12,15 +12,23 @@ tests c2z/srbit, and a one-level call/return (`call` action, target 'ret').
 """
 
 TESTS_V1 = {"always", "tmr", "fifo", "cz", "in0h", "in0l", "in1h", "in1l"}
-TESTS_V2 = TESTS_V1 | {"c2z", "srbit"}
+TESTS_V2 = TESTS_V1 | {"c2z", "srbit", "stall"}
 ACTS_V1 = ["load", "clr", "shift", "push", "cload", "cdec", "trst", "thalf"]
 ACTS_V2_EXTRA = ["loadk", "loadcrc", "cload_b", "cload_c", "c2load", "c2dec",
-                 "crcrst", "crcstep", "call"]
-ACT_ORDER = ["load", "loadk", "loadcrc", "clr", "crcrst", "crcstep", "shift", "push",
+                 "crcrst", "crcstep", "call",
+                 # SPEC section 9 reserved codes, now implemented. They drive the
+                 # WIDER shared units: a 16-bit programmable CRC and the bit
+                 # stuffer. The per-SM CRC5 above is fixed at polynomial 0x14.
+                 "crc16rst", "crc16step", "stuffrst"]
+# crc16step sits with crcstep, BEFORE shift, for the reason SPEC section 8.2
+# gives for crcstep: a CRC step must see the shift register as it was, not after
+# this row's shift. Appending it at the end would silently invert that.
+ACT_ORDER = ["load", "loadk", "loadcrc", "clr", "crcrst", "crcstep",
+             "crc16rst", "crc16step", "stuffrst", "shift", "push",
              "cload", "cload_b", "cload_c", "cdec", "c2load", "c2dec", "trst", "thalf",
              "call"]
 PINOPS_V1 = {"hold", "lo", "hi", "sr"}
-PINOPS_V2 = PINOPS_V1 | {"tgl", "d0", "d1"}
+PINOPS_V2 = PINOPS_V1 | {"tgl", "d0", "d1", "crcb"}
 
 WIDTH = {1: 4 + 5 + 5 + 3 * 2 + 8, 2: 4 + 5 + 5 + 3 * 3 + 16}
 MAX_ROWS = 32
@@ -81,7 +89,10 @@ class SttProgram:
 
 class SttCore:
     def __init__(self, prog, *, slots, ins=(), period, shift="right", fill="0",
-                 sr_width=8, cload=(8, 0, 0), c2load=0, loadk=0, init_pins=None):
+                 sr_width=8, cload=(8, 0, 0), c2load=0, loadk=0, init_pins=None,
+                 crc16_poly=0, crc16_width=16, crc16_reflect=False,
+                 crc16_seed_ones=False, stuff_n=0, stuff_ones=False,
+                 stuff_slots=()):
         """slots: list of (net, mode) with mode 'pp' or 'od'. ins: nets for in0, in1."""
         self.p = prog
         self.slots, self.ins = slots, list(ins)
@@ -95,6 +106,75 @@ class SttCore:
         self.tcount = period - 1
         self.pinv = list(init_pins) if init_pins else [1] * len(slots)
         self.name = "stt"
+
+        # ---- the wider shared units (SPEC section 9) ----------------------
+        # Configuration, per SPEC section 9's reserved_config: polynomial, bit
+        # order and seed are per-program constants, not row fields.
+        self.crc16_poly = crc16_poly
+        self.crc16_w = crc16_width
+        self.crc16_reflect = crc16_reflect
+        self.crc16_seed_ones = crc16_seed_ones
+        self.crc16 = ((1 << crc16_width) - 1) if crc16_seed_ones else 0
+        # Bit stuffer: stuff_n identical bits force a complementary bit.
+        # stuff_ones counts only 1s (USB, HDLC); otherwise any identical run
+        # (CAN). stuff_slots names which output slots route through it.
+        self.stuff_n = stuff_n
+        self.stuff_ones = stuff_ones
+        self.stuff_slots = set(stuff_slots)
+        self.stuff_run = 0
+        self.stuff_last = None
+
+    # ---- the wider shared units (SPEC section 9) -------------------------
+    def _crc16_mask(self):
+        return (1 << self.crc16_w) - 1
+
+    def _crc16_advance(self, bit):
+        """One Galois step. Reflected = right-shifting (USB-style); otherwise
+        left-shifting MSB-first, which is what CAN and CCITT CRCs use."""
+        m = self._crc16_mask()
+        if self.crc16_reflect:
+            fb = (self.crc16 ^ bit) & 1
+            self.crc16 = ((self.crc16 >> 1) ^ self.crc16_poly) & m if fb \
+                else (self.crc16 >> 1) & m
+        else:
+            top = (self.crc16 >> (self.crc16_w - 1)) & 1
+            fb = top ^ (bit & 1)
+            self.crc16 = ((self.crc16 << 1) ^ self.crc16_poly) & m if fb \
+                else (self.crc16 << 1) & m
+
+    def _crc16_shift_out(self):
+        """The bit leaving the register, advancing it. This is how a CRC is
+        transmitted -- shifted onto the wire -- rather than loaded into the
+        shift register, which is why no act_sr code was needed for it."""
+        m = self._crc16_mask()
+        if self.crc16_reflect:
+            b = self.crc16 & 1
+            self.crc16 = (self.crc16 >> 1) & m
+        else:
+            b = (self.crc16 >> (self.crc16_w - 1)) & 1
+            self.crc16 = (self.crc16 << 1) & m
+        return b
+
+    def _stall(self):
+        """True when the stuffer will insert a bit instead of accepting one."""
+        if not self.stuff_n or self.stuff_last is None:
+            return False
+        if self.stuff_ones and self.stuff_last != 1:
+            return False
+        return self.stuff_run >= self.stuff_n
+
+    def _through_stuffer(self, bit):
+        """Emit one bit through the stuffer, returning what reaches the pin."""
+        if self._stall():
+            out = 1 - self.stuff_last
+            self.stuff_run, self.stuff_last = 1, out
+            return out
+        if self.stuff_last is not None and bit == self.stuff_last:
+            self.stuff_run += 1
+        else:
+            self.stuff_run = 1
+        self.stuff_last = bit
+        return bit
 
     def _srbit(self):
         return (self.sr >> (self.w - 1)) & 1 if self.shift == "left" else self.sr & 1
@@ -112,6 +192,8 @@ class SttCore:
             return self.c2 == 0
         if test == "srbit":
             return self._srbit() == 1
+        if test == "stall":
+            return self._stall()
         pin = w.read_sync(self.ins[int(test[2])])
         return pin == (1 if test[3] == "h" else 0)
 
@@ -141,6 +223,12 @@ class SttCore:
                 elif a == "crcstep":
                     b = self._srbit()
                     self.crc = (self.crc >> 1) ^ 0x14 if (self.crc ^ b) & 1 else self.crc >> 1
+                elif a == "crc16rst":
+                    self.crc16 = self._crc16_mask() if self.crc16_seed_ones else 0
+                elif a == "crc16step":
+                    self._crc16_advance(self._srbit())
+                elif a == "stuffrst":
+                    self.stuff_run, self.stuff_last = 0, None
                 elif a == "shift":
                     f = {"0": 0, "1": 1}.get(self.fill)
                     if f is None:
@@ -169,19 +257,38 @@ class SttCore:
                     new_t = self.P // 2 - 1
             for slot, op in r.pins.items():
                 if slot == "pair":
+                    # crcb on the pair drives both halves from one shift-out,
+                    # as the SPEC section 7 pin-op table says. Without this the
+                    # dict lookup below raises KeyError on a row the encoding
+                    # permits.
+                    if op == "crcb":
+                        cb = self._crc16_shift_out()
+                        self.pinv[0], self.pinv[1] = cb, cb
+                        continue
                     b = self._srbit()
                     a0, a1 = {"lo": (0, 0), "hi": (1, 1), "sr": (b, 1 - b), "d0": (0, 1),
                               "d1": (1, 0), "tgl": (self.pinv[0] ^ 1, self.pinv[1] ^ 1)}[op]
                     self.pinv[0], self.pinv[1] = a0, a1
                     continue
+                # The value the row asks for, before the stuffer sees it.
                 if op == "lo":
-                    self.pinv[slot] = 0
+                    want = 0
                 elif op == "hi":
-                    self.pinv[slot] = 1
+                    want = 1
                 elif op == "sr":
-                    self.pinv[slot] = self._srbit()
+                    want = self._srbit()
+                elif op == "crcb":
+                    want = self._crc16_shift_out()
                 elif op == "tgl":
-                    self.pinv[slot] ^= 1
+                    want = self.pinv[slot] ^ 1
+                else:
+                    continue          # hold, and d0/d1 on a single slot
+                # A slot routed through the bit stuffer may emit a stuffed bit
+                # instead of the one the row asked for. That is why `stall`
+                # exists: the program tests it and holds the shift register.
+                if slot in self.stuff_slots:
+                    want = self._through_stuffer(want)
+                self.pinv[slot] = want
             target = r.t
             if "call" in acts:
                 self.link = self.p.index[r.f]

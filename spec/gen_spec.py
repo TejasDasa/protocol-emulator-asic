@@ -102,12 +102,8 @@ def blocks(spec):
     b["action-rule"] = table(["group", "rule"], lines) + (
         f"\n\nAn action set is encodable in one row if and only if it satisfies every "
         f"rule above. That makes **{total}** distinct action sets reachable."
-        + (f"\n\nThat count is over the codes that are IMPLEMENTED. The reserved codes "
-           f"in \u00a79 add three to the `xx` group, taking it from "
-           f"{len(spec['action_groups'][-1]['choices'])} choices to 8; an implementation that "
-           f"includes the wider shared units therefore reaches "
-           f"{total // len(spec['action_groups'][-1]['choices']) * 8} distinct sets. The two "
-           f"numbers are the same rule applied to different code sets, not a discrepancy.")
+        + "\n\nEvery code in that count is implemented: the wider shared units of "
+          "\u00a79 are live, not reserved, so there is no second count."
     )
 
     b["state"] = table(
@@ -125,16 +121,6 @@ def blocks(spec):
 
     b["action-order"] = ("Within a row, actions take effect in this fixed order:\n\n"
                          + " → ".join(f"`{a}`" for a in spec["action_order"]))
-
-    b["reserved-codes"] = table(
-        ["field", "code", "name", "unit", "meaning"],
-        [[f"`{r['field']}`", r["code"], f"`{r['name']}`", f"`{r['unit']}`", r["meaning"]]
-         for r in spec["reserved_codes"]]
-    ) + "\n\nand the configuration these codes rely on:\n\n" + table(
-        ["config item", "unit", "maps to"],
-        [[f"`{c['name']}`", f"`{c['unit']}`", f"`{c['maps_to']}`"]
-         for c in spec["reserved_config"]]
-    )
 
     b["next-row-rule"] = (f"**`next` = `{spec['next_row_rule']['rule']}`.**\n\n"
                           + spec["next_row_rule"]["note"])

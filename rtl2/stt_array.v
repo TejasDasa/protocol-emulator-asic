@@ -69,7 +69,11 @@ module stt_array #(
     output wire [NSM*5-1:0]       dbg_crc,
     output wire [NSM*TIMER_W-1:0] dbg_tcount,
     output wire [NSM*ADDR_W-1:0]  dbg_link,
-    output wire [NSM*NSLOT-1:0]   dbg_pinv
+    output wire [NSM*NSLOT-1:0]   dbg_pinv,
+    output wire [NSM*16-1:0]      dbg_crc16,
+    output wire [NSM*4-1:0]       dbg_stuff_run,
+    output wire [NSM-1:0]         dbg_stuff_last,
+    output wire [NSM-1:0]         dbg_stuff_valid
 );
 
   wire [NSM-1:0] busy;
@@ -105,7 +109,11 @@ module stt_array #(
           .dbg_crc   (dbg_crc[g*5       +: 5]),
           .dbg_tcount(dbg_tcount[g*TIMER_W +: TIMER_W]),
           .dbg_link  (dbg_link[g*ADDR_W +: ADDR_W]),
-          .dbg_pinv  (dbg_pinv[g*NSLOT  +: NSLOT])
+          .dbg_pinv  (dbg_pinv[g*NSLOT  +: NSLOT]),
+          .dbg_crc16 (dbg_crc16[g*16   +: 16]),
+          .dbg_stuff_run  (dbg_stuff_run[g*4 +: 4]),
+          .dbg_stuff_last (dbg_stuff_last[g]),
+          .dbg_stuff_valid(dbg_stuff_valid[g])
       );
     end
   endgenerate

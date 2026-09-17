@@ -15,7 +15,11 @@ import itertools
 import random
 from stt import Row, SttProgram, TESTS_V2, ACT_ORDER, PINOPS_V2
 
-TESTS = sorted(TESTS_V2)                     # 10 tests -> 4 bits
+# APPENDED, never re-sorted. New bits enter the code space at the END: the
+# frozen encodings depend on every existing index, and sorting "stall" in would
+# slide `tmr` from 9 to 10 and silently re-encode every program ever written.
+RESERVED_TESTS = ["stall"]
+TESTS = sorted(TESTS_V2 - set(RESERVED_TESTS)) + RESERVED_TESTS
 PINOPS = ["hold", "lo", "hi", "sr", "tgl"]   # 3 bits per slot
 ACTS = ACT_ORDER                             # 17 flags incl. 3 counter loads (16 in v2 accounting)
 RET = 31
@@ -27,7 +31,9 @@ GROUPS = [
     ("c1", [(), ("cload",), ("cload_b",), ("cload_c",), ("cdec",)]),   # 3 bits
     ("c2", [(), ("c2load",), ("c2dec",)]),                             # 2 bits
     ("tm", [(), ("trst",), ("thalf",)]),                               # 2 bits
-    ("xx", [(), ("crcrst",), ("crcstep",), ("call",), ("crcrst", "call")]),  # 3 bits
+    ("xx", [(), ("crcrst",), ("crcstep",), ("call",), ("crcrst", "call"),
+            # SPEC section 9: APPENDED, so codes 0-4 above never move.
+            ("crc16rst",), ("crc16step",), ("stuffrst",)]),         # 3 bits
 ]
 
 

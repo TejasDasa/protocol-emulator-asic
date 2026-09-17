@@ -72,6 +72,20 @@ def build(seed):
         c2load=c("c2").randrange(256),
         loadk=c("k").randrange(256),
         init_pins=[c(f"init{i}").randrange(2) for i in range(len(OUTS))],
+        # SPEC section 9 wider units. Drawn from NEW named streams, so every
+        # stream that already existed yields exactly what it did before and
+        # program N is still program N. Leaving these at their defaults meant
+        # `stall` was always false, `crcb` shifted an all-zero register and
+        # `crc16step` advanced a zero polynomial: the codes were executed but
+        # the units were switched off, which is not coverage of anything.
+        crc16_poly=c("c16poly").randrange(1 << 16),
+        crc16_width=c("c16w").choice([5, 8, 15, 16]),
+        crc16_reflect=c("c16r").choice([False, True]),
+        crc16_seed_ones=c("c16s").choice([False, True]),
+        stuff_n=c("stn").choice([0, 3, 5, 6]),
+        stuff_ones=c("sto").choice([False, True]),
+        stuff_slots=tuple(i for i in range(len(OUTS))
+                          if c("sts%d" % i).randrange(2)),
     )
     return core, prog, w, words
 

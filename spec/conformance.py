@@ -98,24 +98,6 @@ def main():
             check("pair-only" in str(e),
                   f"{op} on a single slot was rejected for the wrong reason: {e}")
 
-    # SPEC section 9: the reserved codes are deliberately NOT in the live
-    # tables, so the models must not carry them.
-    from rowformat import PINOPS as _PO
-    from rowenc import TESTS as _T, GROUPS as _G
-    for r in spec.get("reserved_codes", []):
-        if r["field"] == "pin_op":
-            check(r["name"] not in _PO,
-                  f"reserved pin_op {r['name']!r} must not be in rowformat.PINOPS yet")
-        elif r["field"] == "test":
-            check(r["name"] not in _T,
-                  f"reserved test {r['name']!r} must not be in rowenc.TESTS yet")
-        elif r["field"].startswith("act_"):
-            g = dict(_G)[r["field"][4:]]
-            check(all(r["name"] not in c for c in g),
-                  f"reserved action {r['name']!r} must not be in GROUPS yet")
-        check(r["code"] >= {"pin_op": len(_PO), "test": len(_T)}.get(
-                  r["field"], len(dict(_G).get(r["field"][4:], []))),
-              f"reserved {r['field']} code {r['code']} collides with a live code")
 
     # ---- pin map (section 11.1) -----------------------------------------
     pm = spec.get("pin_map", {})

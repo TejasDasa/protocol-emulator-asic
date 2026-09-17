@@ -20,7 +20,8 @@ from rowenc import (best_order, pack, unpack, rebuild, bits_for, RET, TESTS,
                     encode_actions_grouped, decode_actions_grouped, GROUPS, GROUP_BITS, ACTS)
 from stt import SttProgram
 
-PINOPS = ["hold", "lo", "hi", "sr", "tgl", "d0", "d1"]
+# "crcb" appended: codes 0-6 must not move. SPEC section 9.
+PINOPS = ["hold", "lo", "hi", "sr", "tgl", "d0", "d1", "crcb"]
 SLOTS = [0, 1, 2, "pair"]
 NO_CL = [a for a in ACTS if a not in ("cload", "cload_b", "cload_c")]
 CLOADS = ["", "cload", "cload_b", "cload_c"]

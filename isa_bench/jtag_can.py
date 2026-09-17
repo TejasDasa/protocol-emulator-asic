@@ -114,49 +114,106 @@ class JtagTap:
 
 
 # ------------------------------------------------------------------- CAN
+# ------------------------------------------------------------------- CAN
 class CanRx:
-    """CAN base-frame receiver: samples a bit-stuffed NRZ stream and removes
-    stuffing (a complementary bit after 5 identical). Records the de-stuffed
-    frame. Enforces a minimum bit time, same convention as the others."""
+    """CAN base-frame receiver: recovers the bit clock from the SOF edge,
+    samples mid-bit, removes stuffing and checks the CRC-15.
 
-    def __init__(self, rx, bit_nominal=None, tol=0.25, stuff_after=5):
+    Stuffing covers SOF through the end of the CRC sequence; the delimiters,
+    ACK slot and EOF that follow are sent raw. The length of the stuffed
+    region is not known until the DLC has been decoded, so this is a
+    structural decode rather than a fixed-length one -- which is also why the
+    receiver cannot simply count edges to find the end of a frame.
+    """
+
+    CRC_POLY = 0x4599       # x^15 + x^14 + x^10 + x^8 + x^7 + x^4 + x^3 + 1
+
+    def __init__(self, rx, bit_nominal, tol=0.25, stuff_after=5):
         self.rx = rx
-        self.bit_min = None if bit_nominal is None else bit_nominal * (1.0 - tol)
+        self.P = bit_nominal
+        self.bit_min = bit_nominal * (1.0 - tol)
         self.stuff_after = stuff_after
-        self.prev = None
-        self.last_edge_t = None
-        self.bits = []          # de-stuffed
-        self.raw = []
-        self.run_val, self.run_len = None, 0
         self.frames = []
-        self.active = False
+        self.prev = 1
+        self.start = None
+        self.raw = []
+        self.edges = []
+        self.last_edge_t = None
 
-    def feed(self, b, w):
-        """One raw bit: drop it if it is a stuff bit, else record it."""
-        self.raw.append(b)
-        if self.run_val == b:
-            self.run_len += 1
-        else:
-            self.run_val, self.run_len = b, 1
-        if self.run_len > self.stuff_after:
-            w.error(f"can: {self.run_len} identical bits, stuffing violated")
-        # a bit immediately following a run of `stuff_after` is a stuff bit
-        if len(self.raw) >= 2 and self._prev_run == self.stuff_after and b != self.raw[-2]:
-            self.run_val, self.run_len = b, 1
-            return
-        self.bits.append(b)
+    @classmethod
+    def crc15(cls, bits):
+        c = 0
+        for b in bits:
+            top = (c >> 14) & 1
+            c = ((c << 1) ^ (cls.CRC_POLY if top ^ b else 0)) & 0x7FFF
+        return c
+
+    def _destuff(self):
+        """De-stuff self.raw. Returns (bits, n_consumed), ("violation", i) or
+        None when more raw bits are still needed."""
+        bits, run, last, need, i = [], 0, None, None, 0
+        while i < len(self.raw):
+            b = self.raw[i]
+            if last is not None and run >= self.stuff_after:
+                if b == last:                   # must have been a complement
+                    return ("violation", i)
+                run, last, i = 1, b, i + 1
+                continue
+            run = run + 1 if b == last else 1
+            last = b
+            bits.append(b)
+            i += 1
+            if need is None and len(bits) >= 19:
+                dlc = sum(bits[15 + k] << (3 - k) for k in range(4))
+                need = 19 + 8 * min(dlc, 8) + 15
+            if need is not None and len(bits) == need:
+                return (bits, i)
+        return None
 
     def step(self, w):
         v = w.value(self.rx)
-        if self.prev is None:
-            self.prev = v
-            self.last_edge_t = w.t
-            return
+        t = w.t
         if v != self.prev:
-            if self.bit_min is not None and self.last_edge_t is not None:
-                dur = w.t - self.last_edge_t
+            if self.start is not None and self.last_edge_t is not None:
+                dur = t - self.last_edge_t
                 if dur < self.bit_min:
                     w.error(f"can: edge after {dur} cycles < minimum "
                             f"{self.bit_min:.1f} (master ignored its bit timer?)")
-            self.last_edge_t = w.t
+            self.last_edge_t = t
+            self.edges.append(t)
+        if self.start is None and self.prev == 1 and v == 0:
+            self.start, self.raw, self.edges = t, [], [t]
+            self.last_edge_t = t
+        if self.start is not None:
+            _k, r = divmod(t - self.start, self.P)
+            if r == self.P // 2:
+                self.raw.append(v)
+                res = self._destuff()
+                if res is not None:
+                    self._finish(w, res)
         self.prev = v
+
+    def _finish(self, w, res):
+        bits, _n = res
+        self.start = None
+        if bits == "violation":
+            w.error(f"can: stuffing violated, no complement after "
+                    f"{self.stuff_after} identical bits")
+            self.frames.append({"error": "stuffing"})
+            return
+        dlc = sum(bits[15 + k] << (3 - k) for k in range(4))
+        n = 19 + 8 * dlc
+        body, crc_rx = bits[:n], bits[n:n + 15]
+        got = sum(b << (14 - i) for i, b in enumerate(crc_rx))
+        want = self.crc15(body)
+        if got != want:
+            w.error(f"can: CRC-15 mismatch, got 0x{got:04x} want 0x{want:04x}")
+        if bits[0] != 0:
+            w.error("can: SOF not dominant")
+        self.frames.append({
+            "id": sum(bits[1 + k] << (10 - k) for k in range(11)),
+            "rtr": bits[12], "ide": bits[13], "dlc": dlc,
+            "data": [sum(body[19 + 8 * j + k] << (7 - k) for k in range(8))
+                     for j in range(dlc)],
+            "crc": got, "crc_ok": got == want,
+        })

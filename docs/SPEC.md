@@ -120,6 +120,16 @@ nothing here pins the width. See §16.
 **SPECIFIED — FIFO depth and scope.**
 
 <!-- BEGIN GENERATED: fifo -->
+<!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
+
+| property                | value                                                                  |
+|-------------------------|------------------------------------------------------------------------|
+| depth                   | 4 entries                                                              |
+| width                   | 8 bits                                                                 |
+| scope                   | per state machine                                                      |
+| binding case            | uart_rx at 3 cycles per bit, 10 bits per byte = a byte every 30 cycles |
+| host latency at depth 4 | 120 cycles                                                             |
+
 <!-- END GENERATED: fifo -->
 
 **Per machine, not shared.** The models give every `SttCore` its own queues. A
@@ -200,24 +210,25 @@ row**, before any of the row's actions take effect.
 <!-- BEGIN GENERATED: tests -->
 <!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
 
-| code | name     | true when                                            |
-|------|----------|------------------------------------------------------|
-| 0    | `always` | Unconditionally true.                                |
-| 1    | `c2z`    | True when counter 2 reads zero.                      |
-| 2    | `cz`     | True when counter 1 reads zero.                      |
-| 3    | `fifo`   | True when the TX FIFO is not empty.                  |
-| 4    | `in0h`   | True when synchronized input 0 reads 1.              |
-| 5    | `in0l`   | True when synchronized input 0 reads 0.              |
-| 6    | `in1h`   | True when synchronized input 1 reads 1.              |
-| 7    | `in1l`   | True when synchronized input 1 reads 0.              |
-| 8    | `srbit`  | True when the shift register serial bit reads 1.     |
-| 9    | `tmr`    | True on the cycle the timer reaches zero (the tick). |
+| code | name     | true when                                                                                                        |
+|------|----------|------------------------------------------------------------------------------------------------------------------|
+| 0    | `always` | Unconditionally true.                                                                                            |
+| 1    | `c2z`    | True when counter 2 reads zero.                                                                                  |
+| 2    | `cz`     | True when counter 1 reads zero.                                                                                  |
+| 3    | `fifo`   | True when the TX FIFO is not empty.                                                                              |
+| 4    | `in0h`   | True when synchronized input 0 reads 1.                                                                          |
+| 5    | `in0l`   | True when synchronized input 0 reads 0.                                                                          |
+| 6    | `in1h`   | True when synchronized input 1 reads 1.                                                                          |
+| 7    | `in1l`   | True when synchronized input 1 reads 0.                                                                          |
+| 8    | `srbit`  | True when the shift register serial bit reads 1.                                                                 |
+| 9    | `tmr`    | True on the cycle the timer reaches zero (the tick).                                                             |
+| 10   | `stall`  | True while the bit stuffer will insert a bit rather than accept one, so the program can hold the shift register. |
 
 <!-- END GENERATED: tests -->
 
-Traced to `SttCore._test` in `isa_bench/stt.py`. Code 10 is RESERVED as `stall`
-for the bit stuffer (§9) and has no implementation. Codes 11–15 are unassigned;
-see §16.
+Traced to `SttCore._test` in `isa_bench/stt.py`. Code 10 is `stall`, the bit
+stuffer test of §9; it is implemented in the models and in `rtl2`. Codes
+11–15 are unassigned; see §16.
 
 Three of these need their sampling point stated precisely, and §8 does so:
 
@@ -351,13 +362,16 @@ fixed palette and the 8 loadable entries described there do not exist.
 
 **Group `xx`** — row bits [31:29], group-local [12:10]. CRC and call. At most one choice per row.
 
-| code | actions          | meaning                                            |
-|------|------------------|----------------------------------------------------|
-| 0    | —                | No action.                                         |
-| 1    | `crcrst`         | Reset the CRC register to all ones.                |
-| 2    | `crcstep`        | Advance the CRC by the shift register serial bit.  |
-| 3    | `call`           | Write the row's false exit into the link register. |
-| 4    | `crcrst`, `call` | Reset the CRC and link, in that order.             |
+| code | actions          | meaning                                                              |
+|------|------------------|----------------------------------------------------------------------|
+| 0    | —                | No action.                                                           |
+| 1    | `crcrst`         | Reset the CRC register to all ones.                                  |
+| 2    | `crcstep`        | Advance the CRC by the shift register serial bit.                    |
+| 3    | `call`           | Write the row's false exit into the link register.                   |
+| 4    | `crcrst`, `call` | Reset the CRC and link, in that order.                               |
+| 5    | `crc16rst`       | Seed the shared 16-bit CRC from its configured seed. Frame boundary. |
+| 6    | `crc16step`      | Advance the shared CRC by the shift register serial bit.             |
+| 7    | `stuffrst`       | Flush the bit stuffer's run counter. Frame boundary.                 |
 
 <!-- END GENERATED: action-groups -->
 
@@ -372,17 +386,17 @@ rule an implementer applies; it is not a statistic.
 <!-- BEGIN GENERATED: action-rule -->
 <!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
 
-| group | rule                                                                                                           |
-|-------|----------------------------------------------------------------------------------------------------------------|
-| `sr`  | at most one of `clr`, `load`, `loadcrc`, `loadk`, `push`, `shift`; except {`clr`, `shift`} may appear together |
-| `c1`  | at most one of `cdec`, `cload`, `cload_b`, `cload_c`                                                           |
-| `c2`  | at most one of `c2dec`, `c2load`                                                                               |
-| `tm`  | at most one of `thalf`, `trst`                                                                                 |
-| `xx`  | at most one of `call`, `crcrst`, `crcstep`; except {`crcrst`, `call`} may appear together                      |
+| group | rule                                                                                                                           |
+|-------|--------------------------------------------------------------------------------------------------------------------------------|
+| `sr`  | at most one of `clr`, `load`, `loadcrc`, `loadk`, `push`, `shift`; except {`clr`, `shift`} may appear together                 |
+| `c1`  | at most one of `cdec`, `cload`, `cload_b`, `cload_c`                                                                           |
+| `c2`  | at most one of `c2dec`, `c2load`                                                                                               |
+| `tm`  | at most one of `thalf`, `trst`                                                                                                 |
+| `xx`  | at most one of `call`, `crc16rst`, `crc16step`, `crcrst`, `crcstep`, `stuffrst`; except {`crcrst`, `call`} may appear together |
 
-An action set is encodable in one row if and only if it satisfies every rule above. That makes **1800** distinct action sets reachable.
+An action set is encodable in one row if and only if it satisfies every rule above. That makes **2880** distinct action sets reachable.
 
-That count is over the codes that are IMPLEMENTED. The reserved codes in §9 add three to the `xx` group, taking it from 5 choices to 8; an implementation that includes the wider shared units therefore reaches 2880 distinct sets. The two numbers are the same rule applied to different code sets, not a discrepancy.
+Every code in that count is implemented: the wider shared units of §9 are live, not reserved, so there is no second count.
 
 <!-- END GENERATED: action-rule -->
 
@@ -408,7 +422,7 @@ order, regardless of the order of the group fields:
 
 Within a row, actions take effect in this fixed order:
 
-`load` → `loadk` → `loadcrc` → `clr` → `crcrst` → `crcstep` → `shift` → `push` → `cload` → `cload_b` → `cload_c` → `cdec` → `c2load` → `c2dec` → `trst` → `thalf` → `call`
+`load` → `loadk` → `loadcrc` → `clr` → `crcrst` → `crcstep` → `crc16rst` → `crc16step` → `stuffrst` → `shift` → `push` → `cload` → `cload_b` → `cload_c` → `cdec` → `c2load` → `c2dec` → `trst` → `thalf` → `call`
 
 <!-- END GENERATED: action-order -->
 
@@ -455,15 +469,16 @@ column:
 <!-- BEGIN GENERATED: pin-ops -->
 <!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
 
-| code | op     | single slot                                                                                      | pair slot (code 3)        |
-|------|--------|--------------------------------------------------------------------------------------------------|---------------------------|
-| 0    | `hold` | No write. The slot keeps its value.                                                              | No write.                 |
-| 1    | `lo`   | Drive 0.                                                                                         | Drive (0,0).              |
-| 2    | `hi`   | Drive 1.                                                                                         | Drive (1,1).              |
-| 3    | `sr`   | Drive the shift register serial bit.                                                             | Drive (srbit, NOT srbit). |
-| 4    | `tgl`  | Invert the slot.                                                                                 | Invert both slots.        |
-| 5    | `d0`   | No write; the slot holds. d0/d1 are pair-only ops and the encoder rejects them on a single slot. | Drive (0,1).              |
-| 6    | `d1`   | No write; the slot holds. d0/d1 are pair-only ops and the encoder rejects them on a single slot. | Drive (1,0).              |
+| code | op     | single slot                                                                                      | pair slot (code 3)                             |
+|------|--------|--------------------------------------------------------------------------------------------------|------------------------------------------------|
+| 0    | `hold` | No write. The slot keeps its value.                                                              | No write.                                      |
+| 1    | `lo`   | Drive 0.                                                                                         | Drive (0,0).                                   |
+| 2    | `hi`   | Drive 1.                                                                                         | Drive (1,1).                                   |
+| 3    | `sr`   | Drive the shift register serial bit.                                                             | Drive (srbit, NOT srbit).                      |
+| 4    | `tgl`  | Invert the slot.                                                                                 | Invert both slots.                             |
+| 5    | `d0`   | No write; the slot holds. d0/d1 are pair-only ops and the encoder rejects them on a single slot. | Drive (0,1).                                   |
+| 6    | `d1`   | No write; the slot holds. d0/d1 are pair-only ops and the encoder rejects them on a single slot. | Drive (1,0).                                   |
+| 7    | `crcb` | Drive the shared CRC serial bit, advancing the register.                                         | Drive the shared CRC serial bit on both slots. |
 
 <!-- END GENERATED: pin-ops -->
 
@@ -668,37 +683,14 @@ input be driven, and is not an architecture.
 Taking every control input from the two module port lists and asking where each
 one has to live, **7 of 12 are per-program constants** that the existing serial
 configuration chain carries, and **5 need a row to be able to say them**. Those
-five are reserved here:
+five need a row code, and get one here:
 
-<!-- BEGIN GENERATED: reserved-codes -->
-<!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
-
-| field    | code | name        | unit          | meaning                                                                                                                               |
-|----------|------|-------------|---------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| `act_xx` | 5    | `crc16rst`  | `crc_lfsr16`  | Seed the shared 16-bit CRC/LFSR from its configured seed value. Frame boundary.                                                       |
-| `act_xx` | 6    | `crc16step` | `crc_lfsr16`  | Advance the shared CRC by the shift register serial bit.                                                                              |
-| `act_xx` | 7    | `stuffrst`  | `bit_stuffer` | Flush the bit stuffer's run counter. Frame boundary.                                                                                  |
-| `pin_op` | 7    | `crcb`      | `crc_lfsr16`  | Drive the selected slot from the shared CRC serial bit, advancing the register. Replaces a slot write rather than competing with one. |
-| `test`   | 10   | `stall`     | `bit_stuffer` | True while the stuffer is inserting a bit and not accepting one, so the program can hold the shift register.                          |
-
-and the configuration these codes rely on:
-
-| config item     | unit          | maps to                                                                             |
-|-----------------|---------------|-------------------------------------------------------------------------------------|
-| `crc16_poly`    | `crc_lfsr16`  | `poly_in/poly_we`                                                                   |
-| `crc16_reflect` | `crc_lfsr16`  | `reflect_in/reflect_we`                                                             |
-| `crc16_seed`    | `crc_lfsr16`  | `seed_ones`                                                                         |
-| `stuff_n`       | `bit_stuffer` | `n_in/n_we`                                                                         |
-| `stuff_mode`    | `bit_stuffer` | `mode_insert_in/mode_ones_in/mode_we`                                               |
-| `slot_stuff`    | `bit_stuffer` | `in_valid/in_bit: per-slot route bit, the slot's output passes through the stuffer` |
-
-<!-- END GENERATED: reserved-codes -->
 
 **This costs zero row bits.** Every code is appended to a field that had spare
 capacity: `test` 10→11 of 16, `pin_op` 7→8 of 8, `act_xx` 5→8 of 8. Because the
-codes are appended rather than inserted, no existing code index moves, and
-`isa_bench/sharedunits.py` verifies this by re-encoding every reference program
-before and after the amendment and comparing the packed words: **all identical,
+codes are appended rather than inserted, no existing code index moves.
+`isa_bench/freeze_check.py` holds the packed words of all six reference
+programs and `make check` fails if any of them moves: **84 rows, all identical,
 all still 32 bits wide**. The row format of §3 is unchanged.
 
 **The residual cost is mutual exclusion, not space.** `act_xx` and `pin_op` are
@@ -710,13 +702,38 @@ a ninth pin op. `act_sr` was already full at 8 of 8 and the amendment
 deliberately avoids it: the CRC residue leaves through `crcb` onto a pin, which
 is how CRCs are actually transmitted, rather than through a shift-register load.
 
-**Status.** These codes are specified in meaning and have **no implementation**:
-no model in `isa_bench/`, no RTL path, and no benchmark uses them. They are held
-in `spec/isa.json` under `reserved_codes`, deliberately outside the live tables
-that `spec/conformance.py` checks against the models, so that the absence of an
-implementation is not mistaken for drift. An implementation that omits the two
-wider units is not violating this specification; one that includes them must
-use these codes. See §16.
+**Status: implemented.** These codes are live in `spec/isa.json`, in the models
+and in `rtl2`, and `spec/conformance.py` checks them alongside every other
+code. A conforming implementation must provide them.
+
+The capability they were added for is measured, not assumed. `isa_bench/can_prog.py`
+transmits a CAN 2.0A base frame in **24 of 32 rows**, checked against the `CanRx`
+receiver in `isa_bench/jtag_can.py` over five identifier/payload combinations,
+with the CRC-15 cross-checked against an independent polynomial reduction and
+the receiver shown to reject corrupted frames at seven glitch positions.
+
+**What they cost.** Measured by synthesising `rtl2` against `sg13cmos5l` before
+and after, with `stt_core` standalone to separate the core from its
+configuration:
+
+| | before | after | delta |
+|---|---|---|---|
+| `stt_core` flops | 62 | 84 | +22 (`crc16` 16, stuffer 6) |
+| `stt_config` flops | 69 | 100 | +31 (polynomial, width, thresholds) |
+| `stt_top` cell area | 94,583.16 | 100,806.85 | **+6.58%** |
+
+`crc16` is reset to zero rather than to its configured seed, and takes the seed
+in the load branch instead. Seeding it asynchronously would make it the only
+register in the design with a non-constant asynchronous reset, which yosys maps
+to 16 `$_ALDFFE_PNP_` async-load flops that the standard cell library has no
+cell for. Avoiding that costs 0.92% of `stt_top` and is worth it.
+
+Neither unit is a convenience. The legacy `crc` unit is 5 bits wide with a
+hard-wired 0x14 polynomial, so CAN’s CRC-15 cannot be computed with the live
+codes at any row count. Bit stuffing in rows costs **54 rows** against a 32-row
+ceiling (`isa_bench/can_soft.py`), and it cannot cover the CRC sequence at all:
+no test reads the wide CRC register, so a program cannot see the bit `crcb`
+emits and cannot track its run length. See §16.
 
 **SPECIFIED — `load` on an empty TX FIFO.** The shift register **holds its
 value** and **no byte is popped**. The row is otherwise unaffected: its other
@@ -1147,7 +1164,7 @@ and where the evidence stops.
 | item | what is missing | where |
 |---|---|---|
 | **Timer width** | `tcount` is an unbounded integer in the models. The structural RTL uses 16 bits. Must cover the required reload period `P`. | §2, §8.4 |
-| **Test codes 11–15** | Unassigned. The models would raise on decode. Code 10 and pin op code 7 are now reserved (§9). | §4, §7 |
+| **Test codes 11–15** | Unassigned. The models would raise on decode. Code 10 and pin op code 7 are now implemented (§9). | §4, §7 |
 | **A 33rd row in hardware** | The toolchain rejects it. The structural RTL's 5-bit write pointer wraps and overwrites row 0. | §12 |
 | **Live reprogramming** | §11.1 specifies that the `run` flag is cleared only by `rst_n`, so reprogramming means asserting reset. What a machine does on the first cycle after a reload short of reset is still undefined. | §10, §11.1 |
 | **Power-up before the first clock edge** | Output pin state between power-up and reset is not modelled. | §11 |
@@ -1157,6 +1174,7 @@ and where the evidence stops.
 | item | status |
 |---|---|
 | **Static timing analysis** | RUN, for configuration C at five machines: post-route setup is −1.266 ns at the slow corner, about 47 MHz, hold met at every corner (§14). NOT run for format D, whose critical paths differ. |
+| **Device-model edge alignment** | Every device model in `isa_bench/` drives its waveform from a fixed start time on an integer-cycle grid, so a machine's timer and the traffic it observes are in a **deterministic phase relationship by construction**. Nothing produces arbitrary edge phase or jitter. This affects every timing result in the repository, including the SPI and I²C minimum-phase assertions of §8: those check a phase is long enough, on waveforms aligned to the machine by construction. Found concretely — a mutation removing the `thalf` mid-bit alignment from the UART detector survives *every* case, because without it the free-running timer lands usably by luck rather than by design (`isa_bench/DETECTOR_NOTES.md`). Arbitrary phase and jitter in the device models is needed for RTL verification regardless, and this mutant is the concrete proof it is missing. |
 | **Inter-pin skew** | The model has no pin path. Skew between a clock and its data — SCK/MOSI, SCL/SDA — is the failure mode that matters in silicon and is entirely unmeasured. |
 | **Multi-state-machine floorplan** | RUN. Five machines and ten macros place and route with zero router DRC errors, and all ten macros are geometrically verified as powered from the routed DEF. Six machines could not be made to route at any placement density or macro grouping. Signoff DRC and LVS are still owed: the flow stopped at IR-drop analysis on a plugin connectivity gap (`floorplan/README.md`). |
 | **The input select path and the `run` flag** | §11.1 specifies per-machine input selects and a `run` flag that releases the control pins during operation. `rtl/stt_iomux.v` implements neither: inputs are a fixed tap that collides with the control pins, and `rtl/stt_chip.v` decodes control unconditionally. Specified, unimplemented. |
@@ -1167,9 +1185,7 @@ and where the evidence stops.
 
 | item | status |
 |---|---|
-| **The wider shared units** | `hostbuf` and `iomux` are reached through existing row fields. `crc_lfsr16` and `bit_stuffer` now have reserved codes (§9), but no model, no RTL path and no benchmark uses them. The codes are specified; the units are unimplemented. |
-| **The 32-row ceiling** | JTAG sits at 25 of 32. The next row costs a third and fourth tile, not one row (§12). No protocol has been written that exceeds 32. |
-| **CAN** | A device model exists (`isa_bench/jtag_can.py`); no program was written. The obstacle is recorded: there is no "same as the previous bit" test, so in-loop run detection for bit stuffing needs duplicated paths. |
+| **The 32-row ceiling** | JTAG sits at 25 of 32 and CAN at 24 of 32. The next row costs a third and fourth tile, not one row (§12). No protocol in the conformance set exceeds 32, but the ceiling does bind: the software-stuffing CAN variant in `isa_bench/can_soft.py` needs 54 rows and is unimplementable because of it. |
 | **I²C START/STOP timing** | Six timer mutants survive. They change pin timing but never below the bit-period minimum, because those rows govern setup and hold intervals that I²C specifies separately (`t_SU;STA`, `t_HD;STA`, `t_SU;STO`) and the benchmark does not check. |
 | **`fixed_entry_i[*]`** | `stt_core` carries an external-palette input used only when `EXT_FIXED=1`. With the palette gone it is dead, and it appears as 13 disconnected pins in a hardened design. A real multi-machine top must not expose it. |
 

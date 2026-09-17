@@ -17,7 +17,8 @@ from lockstep import CFG_BITS, config_word
 STT_ROWS = 32
 
 PERIOD_NS = 10
-FIELDS = ("row", "link", "sr", "cnt", "c2", "crc", "tcount", "pinv")
+FIELDS = ("row", "link", "sr", "cnt", "c2", "crc", "tcount", "pinv",
+          "crc16", "stuff_run", "stuff_last", "stuff_valid")
 
 
 class Divergence(AssertionError):
@@ -209,7 +210,11 @@ async def run_lockstep(dut, core, w, done, max_cycles, label, nslots, words, cov
                        sr=i_(dut.dbg_sr, "dbg_sr"), cnt=i_(dut.dbg_cnt, "dbg_cnt"),
                        c2=i_(dut.dbg_c2, "dbg_c2"), crc=i_(dut.dbg_crc, "dbg_crc"),
                    tcount=i_(dut.dbg_tcount, "dbg_tcount"),
-                   pinv=i_(dut.dbg_pinv, "dbg_pinv"))
+                   pinv=i_(dut.dbg_pinv, "dbg_pinv"),
+                   crc16=i_(dut.dbg_crc16, "dbg_crc16"),
+                   stuff_run=i_(dut.dbg_stuff_run, "dbg_stuff_run"),
+                   stuff_last=i_(dut.dbg_stuff_last, "dbg_stuff_last"),
+                   stuff_valid=i_(dut.dbg_stuff_valid, "dbg_stuff_valid"))
         except Divergence as d:
             raise Divergence(
                 f"{label}: cycle {t}: {d}\n"
@@ -224,7 +229,15 @@ async def run_lockstep(dut, core, w, done, max_cycles, label, nslots, words, cov
                 + "".join(f"      {k}={v}\n" for k, v in pre.items()))
         mdl = dict(row=core.row, link=core.link, sr=core.sr, cnt=core.cnt,
                    c2=core.c2, crc=core.crc, tcount=core.tcount,
-                   pinv=sum((b & 1) << i for i, b in enumerate(core.pinv)))
+                   pinv=sum((b & 1) << i for i, b in enumerate(core.pinv)),
+                   crc16=core.crc16,
+                   # the RTL's run counter saturates at 15; the model's is a
+                   # Python int. Nothing reads it but the comparison against
+                   # stuff_n, so saturating the model here compares the only
+                   # thing that is observable.
+                   stuff_run=min(core.stuff_run, 15),
+                   stuff_last=0 if core.stuff_last is None else core.stuff_last,
+                   stuff_valid=0 if core.stuff_last is None else 1)
         rtl["pinv"] &= (1 << nslots) - 1 if nslots else 0
 
         for f in FIELDS:

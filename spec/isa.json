@@ -2,30 +2,6 @@
   "_source_of_truth": "This file is the single machine-readable source for every encoding table in docs/SPEC.md. The Markdown tables are GENERATED from it by spec/gen_spec.py; do not edit them in the document. spec/conformance.py checks this file field-by-field against the authoritative Python models in isa_bench/, and `make spec-check` fails if either the document or the models drift from it.",
   "_authority": "Where the Python models in isa_bench/ and the structural RTL in rtl/ disagree, the Python models win: they are the versions that pass the benchmarks. As of the freeze they agree on every shared constant (verified by conformance.py).",
 
-  "_reserved_note": "Codes reserved by the shared-unit amendment (isa_bench/sharedunits.py). They are SPECIFIED in meaning but have NO implementation: no model in isa_bench/, no RTL, no benchmark. They are listed separately from the live tables above precisely so that spec/conformance.py does NOT expect the models to carry them. Adding them costs zero row bits and, being appended, leaves every existing code index unchanged -- verified by re-encoding every benchmark bit-identically.",
-
-  "reserved_codes": [
-    {"field": "act_xx", "code": 5, "name": "crc16rst",  "unit": "crc_lfsr16",
-     "meaning": "Seed the shared 16-bit CRC/LFSR from its configured seed value. Frame boundary."},
-    {"field": "act_xx", "code": 6, "name": "crc16step", "unit": "crc_lfsr16",
-     "meaning": "Advance the shared CRC by the shift register serial bit."},
-    {"field": "act_xx", "code": 7, "name": "stuffrst",  "unit": "bit_stuffer",
-     "meaning": "Flush the bit stuffer's run counter. Frame boundary."},
-    {"field": "pin_op", "code": 7, "name": "crcb",      "unit": "crc_lfsr16",
-     "meaning": "Drive the selected slot from the shared CRC serial bit, advancing the register. Replaces a slot write rather than competing with one."},
-    {"field": "test",   "code": 10, "name": "stall",    "unit": "bit_stuffer",
-     "meaning": "True while the stuffer is inserting a bit and not accepting one, so the program can hold the shift register."}
-  ],
-
-  "reserved_config": [
-    {"name": "crc16_poly",    "unit": "crc_lfsr16",  "maps_to": "poly_in/poly_we"},
-    {"name": "crc16_reflect", "unit": "crc_lfsr16",  "maps_to": "reflect_in/reflect_we"},
-    {"name": "crc16_seed",    "unit": "crc_lfsr16",  "maps_to": "seed_ones"},
-    {"name": "stuff_n",       "unit": "bit_stuffer", "maps_to": "n_in/n_we"},
-    {"name": "stuff_mode",    "unit": "bit_stuffer", "maps_to": "mode_insert_in/mode_ones_in/mode_we"},
-    {"name": "slot_stuff",    "unit": "bit_stuffer", "maps_to": "in_valid/in_bit: per-slot route bit, the slot's output passes through the stuffer"}
-  ],
-
   "_pin_map_note": "Section 11.1. The output side is pin-centric: every drivable pin carries a select field naming the ONE driver that drives it, so two state machines cannot contend for a pin -- the question cannot arise. The input side is specified the same way; note that rtl/stt_iomux.v currently uses a fixed tap instead, which is recorded as CURRENT BEHAVIOUR in the document.",
 
   "pin_map": {
@@ -111,7 +87,8 @@
     {"code": 6, "name": "in1h",   "description": "True when synchronized input 1 reads 1."},
     {"code": 7, "name": "in1l",   "description": "True when synchronized input 1 reads 0."},
     {"code": 8, "name": "srbit",  "description": "True when the shift register serial bit reads 1."},
-    {"code": 9, "name": "tmr",    "description": "True on the cycle the timer reaches zero (the tick)."}
+    {"code": 9, "name": "tmr",    "description": "True on the cycle the timer reaches zero (the tick)."},
+    {"code": 10, "name": "stall",  "description": "True while the bit stuffer will insert a bit rather than accept one, so the program can hold the shift register."}
   ],
 
   "branch_modes": [
@@ -135,7 +112,8 @@
     {"code": 3, "name": "sr",   "single": "Drive the shift register serial bit.", "pair": "Drive (srbit, NOT srbit)."},
     {"code": 4, "name": "tgl",  "single": "Invert the slot.", "pair": "Invert both slots."},
     {"code": 5, "name": "d0",   "single": "No write; the slot holds. d0/d1 are pair-only ops and the encoder rejects them on a single slot.", "pair": "Drive (0,1)."},
-    {"code": 6, "name": "d1",   "single": "No write; the slot holds. d0/d1 are pair-only ops and the encoder rejects them on a single slot.", "pair": "Drive (1,0)."}
+    {"code": 6, "name": "d1",   "single": "No write; the slot holds. d0/d1 are pair-only ops and the encoder rejects them on a single slot.", "pair": "Drive (1,0)."},
+    {"code": 7, "name": "crcb", "single": "Drive the shared CRC serial bit, advancing the register.", "pair": "Drive the shared CRC serial bit on both slots."}
   ],
 
   "action_groups": [
@@ -176,11 +154,15 @@
        {"code": 1, "actions": ["crcrst"],            "description": "Reset the CRC register to all ones."},
        {"code": 2, "actions": ["crcstep"],           "description": "Advance the CRC by the shift register serial bit."},
        {"code": 3, "actions": ["call"],              "description": "Write the row's false exit into the link register."},
-       {"code": 4, "actions": ["crcrst", "call"],    "description": "Reset the CRC and link, in that order."}
+       {"code": 4, "actions": ["crcrst", "call"],    "description": "Reset the CRC and link, in that order."},
+       {"code": 5, "actions": ["crc16rst"],          "description": "Seed the shared 16-bit CRC from its configured seed. Frame boundary."},
+       {"code": 6, "actions": ["crc16step"],         "description": "Advance the shared CRC by the shift register serial bit."},
+       {"code": 7, "actions": ["stuffrst"],          "description": "Flush the bit stuffer's run counter. Frame boundary."}
      ]}
   ],
 
-  "action_order": ["load", "loadk", "loadcrc", "clr", "crcrst", "crcstep", "shift", "push",
+  "action_order": ["load", "loadk", "loadcrc", "clr", "crcrst", "crcstep",
+                   "crc16rst", "crc16step", "stuffrst", "shift", "push",
                    "cload", "cload_b", "cload_c", "cdec", "c2load", "c2dec", "trst", "thalf", "call"],
 
   "state": [

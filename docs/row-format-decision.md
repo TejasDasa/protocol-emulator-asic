@@ -44,7 +44,10 @@ at any width up to 32.
 ### Program bits, six benchmarks
 
 UART TX, UART RX, SPI mode 0, I²C master, USB LS token TX, JTAG. **Six, not
-seven — CAN was not completed** (§6).
+seven — CAN was not completed** (§6). CAN has since been written (24
+rows), but the format comparison below is deliberately left over the original
+six: that is the set the encoding freeze covers, and re-running it with a
+seventh program would move the totals without changing the conclusion.
 
 | format | total program bits |
 |---|---|
@@ -456,10 +459,18 @@ for drift. Implementing them is RTL-phase work.
    now 5-6 machines, not 9. What remains open is which of 5 or 6 closes, and
    whether a grouped-macro floorplan beats an interleaved one.
 2. **Whether 32 rows holds for protocols nobody has written.** JTAG is at 78%
-   and it is the only state-machine protocol tested. Ethernet, SD and CAN are
-   unwritten.
-3. **CAN.** Device model written (`isa_bench/jtag_can.py`), STT program not.
-   The structural finding stands in for it (§6) but the row count is unknown.
+   and CAN at 75%, and they are the only state-machine protocols tested.
+   Ethernet and SD are unwritten. The ceiling has now been seen to bind once:
+   the software-stuffing CAN variant needs 54 rows and cannot be built.
+3. **CAN.** SETTLED. `isa_bench/can_prog.py` transmits a 2.0A base frame in
+   **24 of 32 rows**, verified against `CanRx` in `isa_bench/jtag_can.py` and
+   in cycle-exact lockstep with `rtl2`. It needs both SPEC §9 wider units and
+   neither is a convenience: the legacy `crc` unit is 5 bits with a fixed
+   polynomial, so CRC-15 is unreachable at any row count, and software bit
+   stuffing costs 54 rows (`isa_bench/can_soft.py`) and still cannot cover the
+   CRC field, because no test can see the bit `crcb` emits. Measured cost of
+   the two units: **+53 flops per machine** (core 62→84, config 69→100) and
+   **+6.6% cell area** on `stt_top`.
 4. **Post-P&R area for our own design.** Every per-SM figure is `stat` cell area
    or a density projection. No routing, no clock tree, no congestion. The
    template harden calibrates the die, not our logic.

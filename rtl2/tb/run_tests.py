@@ -17,7 +17,10 @@ BENCH = os.path.abspath(os.path.join(RTL, "..", "isa_bench"))
 
 from cocotb_tools.runner import get_runner
 
-PROGRAMS = ["uart_tx", "uart_rx", "spi", "i2c", "usb", "jtag"]
+# The conformance six, plus CAN. CAN is not in the frozen encoding set -- it
+# is here because it is the only program that exercises the SPEC section 9
+# wider units as a protocol rather than as codes.
+PROGRAMS = ["uart_tx", "uart_rx", "spi", "i2c", "usb", "jtag", "can_tx"]
 TIMESCALE = ("1ns", "1ps")
 
 # IMEM=cfgmem swaps the behavioural array for two CFGMEM_IHP16 macros, using the

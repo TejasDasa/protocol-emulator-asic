@@ -85,7 +85,8 @@ The gap is informative rather than alarming, and two survivors are worth naming:
   these deterministic waveforms, happens to land usably. A 3%-skew case was added
   specifically to kill it and did not, because the phase is still deterministic.
   Killing it needs waveforms with arbitrary edge phase or jitter, which the
-  device models do not currently produce.
+  device models do not currently produce -- a gap that applies to every timing
+  result in the repository, not just this one, and is now recorded in SPEC §16.2.
 
 Row-order `swap` mutants also survive, which `mutate.py` already documents as
 equivalent mutants.
@@ -97,6 +98,9 @@ Measuring is cheap; applying is impossible.
 **Measuring** the start-bit width needs a loop counting cycles while the line is
 low — roughly 3–4 rows using a counter and `tmr`, plus a couple to bracket the
 edges. Call it 4–6 rows on top of the 12.
+
+**The architectural answer is several machines each testing a candidate baud**,
+which is what this detector assumes, rather than one machine retuning itself.
 
 **Applying it cannot be done from a program.** The timer period P is
 configuration (§2). The only actions that touch the timer are `trst` and `thalf`,
