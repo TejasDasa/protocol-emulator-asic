@@ -143,8 +143,10 @@ async def chip_lockstep(dut):
     dut.ena.value = 1
     dut.ui_in.value = 0
     dut.uio_in.value = 0
-    dut.tx_ne.value = 0
-    dut.tx_data.value = 0
+    dut.host_sel.value = 0
+    dut.host_tx_we.value = 0
+    dut.host_tx_data.value = 0
+    dut.host_rx_re.value = 0
     dut.rst_n.value = 0
     for _ in range(3):
         await RisingEdge(dut.clk)
@@ -190,6 +192,16 @@ async def chip_lockstep(dut):
         assert waited < 20, "machines never started after run went high"
     dut._log.info(f"machines started {waited} cycles after run")
 
+    # The benchmarks preload the whole TX payload into an UNBOUNDED model queue --
+    # uart_tx queues 7 bytes at cycle 0 -- and the hardware FIFO is 4 deep. So the
+    # payload is taken out of the model queue and fed to BOTH sides together, as
+    # space allows, which is what a real host does. Model and RTL then hold
+    # identical queues and the lockstep stays exact.
+    for m in machines:
+        m["pending"] = []
+        m["model_q"] = 0          # bytes we have fed and the model has not popped
+        m["drained"] = 0
+
     # ---- lockstep, plus the pins -------------------------------------------
     for m in machines:
         m["w"].resolve()
@@ -206,17 +218,42 @@ async def chip_lockstep(dut):
                 d.step(w)
             w.resolve()
 
-        tx_ne_v = 0
-        tx_data_v = 0
-        for k, m in enumerate(machines):
-            if m["w"].tx_fifo:
-                tx_ne_v |= 1 << k
-                tx_data_v |= (m["w"].tx_fifo[0] & 0xFF) << (k * SR_W)
+        for m in machines:
+            # Intercept whatever the benchmark's Host device just queued. It fires
+            # inside the loop, not before it, and dumps the whole payload at once
+            # -- uart_tx queues 7 bytes on cycle 0 against a 4-deep FIFO. Anything
+            # beyond what we have fed is taken for `pending` and released to both
+            # sides together as the hardware has room.
+            extra = len(m["w"].tx_fifo) - m["model_q"]
+            if extra > 0:
+                newly = [m["w"].tx_fifo.pop() for _ in range(extra)]
+                m["pending"].extend(reversed(newly))
             m["tx_before"] = len(m["w"].tx_fifo)
             m["rx_before"] = len(m["w"].rx_fifo)
-        dut.tx_ne.value = tx_ne_v
-        dut.tx_data.value = tx_data_v
+
+        # The host services one machine per cycle, round robin: it tops up that
+        # machine's TX FIFO if it has room, and drains a byte from its RX FIFO if
+        # one is waiting. Five machines means each is serviced every 5 cycles,
+        # against a byte every 30 at the fastest receiver, so depth 4 is never
+        # under pressure here -- which is the point of the number.
+        sel = t % len(machines)
+        ms = machines[sel]
+        dut.host_sel.value = sel
         await settle(dut)
+        will_write = bool(ms["pending"]) and not i_(dut.host_tx_full, "host_tx_full")
+        dut.host_tx_we.value = 1 if will_write else 0
+        dut.host_tx_data.value = ms["pending"][0] if will_write else 0
+        rx_ready = i_(dut.host_rx_ne, "host_rx_ne")
+        dut.host_rx_re.value = rx_ready
+        await settle(dut)
+        if rx_ready:
+            got = i_(dut.host_rx_data, "host_rx_data")
+            want = ms["w"].rx_fifo[ms["drained"]] & 0xFF
+            if got != want:
+                raise Divergence(
+                    f"machine {sel} ({ms['name']}): cycle {t}: host read byte "
+                    f"{ms['drained']} as 0x{got:02x}, model pushed 0x{want:02x}")
+            ms["drained"] += 1
         pops = i_(dut.tx_pop, "tx_pop")
         pushes = i_(dut.rx_push, "rx_push")
 
@@ -225,6 +262,19 @@ async def chip_lockstep(dut):
             m["w"].resolve()
             for nname, n in m["w"].nets.items():
                 m["w"].history[nname].append(n.value)
+            # Taken HERE, before the host's byte is appended below: measuring it
+            # after would see the queue grow and report a negative pop count.
+            m["popped"] = m["tx_before"] - len(m["w"].tx_fifo)
+            m["pushed"] = len(m["w"].rx_fifo) - m["rx_before"]
+
+        # The byte the host wrote lands in the RTL FIFO at the coming edge, so the
+        # model queue gets it now, after the model has stepped: both then see it
+        # from the next cycle.
+        for m in machines:
+            m["model_q"] -= m["popped"]
+        if will_write:
+            ms["w"].tx_fifo.append(ms["pending"].pop(0))
+            ms["model_q"] += 1
 
         # ui_in is driven from the POST-step net values, matching what
         # World.read_sync records. Driving it before the step samples the net
@@ -256,8 +306,8 @@ async def chip_lockstep(dut):
                     raise Divergence(
                         f"machine {k} ({m['name']}): cycle {t}: {f} differs -- "
                         f"RTL {rtl[f]} vs model {mdl[f]}")
-            popped = m["tx_before"] - len(m["w"].tx_fifo)
-            pushed = len(m["w"].rx_fifo) - m["rx_before"]
+            popped = m["popped"]
+            pushed = m["pushed"]
             if ((pops >> k) & 1) != popped:
                 raise Divergence(f"machine {k} ({m['name']}): cycle {t}: "
                                  f"tx_pop {(pops >> k) & 1} vs model {popped}")

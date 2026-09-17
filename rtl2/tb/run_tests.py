@@ -49,7 +49,8 @@ def sources_and_top():
         base = ("stt_config.v", "stt_imem.v", "stt_core.v", "stt_top.v")
         top = "stt_top"
     if chip:
-        base = base + ("stt_array.v", "stt_iomux.v", "stt_chip.v")
+        base = base + ("stt_array.v", "stt_iomux.v", "stt_fifo.v",
+                       "stt_hostbuf.v", "stt_chip.v")
         top = "stt_chip"
     elif multi:
         base = base + ("stt_array.v",)

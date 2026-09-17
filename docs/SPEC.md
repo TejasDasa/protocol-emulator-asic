@@ -117,6 +117,47 @@ the models, so its width is not fixed by them. The structural RTL uses 16 bits.
 An implementation must make it wide enough for the required reload period `P`;
 nothing here pins the width. See §16.
 
+**SPECIFIED — FIFO depth and scope.**
+
+<!-- BEGIN GENERATED: fifo -->
+<!-- END GENERATED: fifo -->
+
+**Per machine, not shared.** The models give every `SttCore` its own queues. A
+shared buffer with round-robin arbitration — which `rtl/stt_hostbuf.v` implements
+and `area-study.md` priced — loses a machine's `push` on any cycle it loses the
+arbiter, and §8.1 forbids stalling to retry, so the byte is gone. That is
+timing-dependent data loss, and cycle-exact lockstep against a per-machine model
+could not hold. At depth 4 the cost is 5 × 2 × 4 × 8 = 320 storage flops plus
+pointers, against roughly 100 shared. It buys determinism.
+
+**Why 4.** The binding case is not the slowest protocol but the fastest
+*receiver*. Measured at each program's minimum working bit period: `uart_rx` at
+3 cycles/bit and 10 bits/byte delivers a byte every **30 cycles**, against SPI's
+52 and I²C's 53. Four entries therefore give a host **120 cycles** — 2.55 µs at
+the 47 MHz of §14 — to service a byte before one is lost. Depth is a parameter
+(`FIFO_DEPTH`), so this can move without touching anything else.
+
+> **A capture mode would not be served by more depth.** If a future program
+> pushed one entry per *edge* rather than per byte, an edge can arrive every 3
+> cycles: depth 4 gives 12 cycles, and even depth 32 gives 96. No plausible FIFO
+> lets a polling host keep up. That capability needs a different mechanism —
+> deeper dedicated capture storage, or in-loop compression by the machine, which
+> is what the CRC and bit-stuffer units of §9 exist for. Sizing this FIFO for it
+> would be wasted area.
+
+**SPECIFIED — overflow and underflow are no-ops, and sticky.** A `push` onto a
+full RX FIFO leaves it unchanged and **drops the byte**; the row's other actions,
+its pin operation and its branch still happen. This is the same rule already
+given above for `load` from an empty TX FIFO, so the two are one rule — *an
+action that cannot be performed is not performed* — rather than two special
+cases. Stalling is not available (§8.1: a row costs exactly one cycle and a
+machine never stalls), and dropping the **oldest** instead would silently corrupt
+an in-order byte stream.
+
+Neither event is silent. Each FIFO sets a **sticky flag**, cleared only by reset,
+so a host can tell that a byte was lost rather than discovering it as corrupt
+protocol data.
+
 **CURRENT BEHAVIOUR — FIFO depth.** The models use unbounded queues for the TX
 and RX FIFOs, so no depth is specified. See §9 and §16.
 
@@ -685,8 +726,10 @@ FIFO"`) but changes no state, and the RTL does the same. Found by the mutation
 suite in `rtl2/tb/`, which reached the case through a corrupted `uart_tx` that
 drains the FIFO faster than it refills.
 
-**CURRENT BEHAVIOUR — FIFO depth.** The models use unbounded queues, so no depth
-is specified, and `push` onto a full RX FIFO is not modelled at all. See §16.
+> The models use unbounded queues and do not model a full RX FIFO at all, so
+> the overflow rule above is a property of the hardware that the models cannot
+> express. A test that lets the RX FIFO overflow will diverge from the model,
+> correctly: the model kept a byte the hardware dropped.
 
 ---
 
@@ -1104,7 +1147,6 @@ and where the evidence stops.
 | item | what is missing | where |
 |---|---|---|
 | **Timer width** | `tcount` is an unbounded integer in the models. The structural RTL uses 16 bits. Must cover the required reload period `P`. | §2, §8.4 |
-| **FIFO depth** | The models use unbounded queues. No depth, and no behaviour for `push` onto a full RX FIFO. `load` on an empty TX FIFO is now specified (§9). | §2, §9 |
 | **Test codes 11–15** | Unassigned. The models would raise on decode. Code 10 and pin op code 7 are now reserved (§9). | §4, §7 |
 | **A 33rd row in hardware** | The toolchain rejects it. The structural RTL's 5-bit write pointer wraps and overwrites row 0. | §12 |
 | **Live reprogramming** | §11.1 specifies that the `run` flag is cleared only by `rst_n`, so reprogramming means asserting reset. What a machine does on the first cycle after a reload short of reset is still undefined. | §10, §11.1 |

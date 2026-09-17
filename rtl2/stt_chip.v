@@ -30,7 +30,10 @@ module stt_chip #(
     parameter CNT_W   = 8,
     parameter TIMER_W = 16,
     parameter NSLOT   = 3,
-    parameter NIN     = 2
+    parameter NIN     = 2,
+    // SPEC section 9. Four entries is 120 cycles of host latency at the binding
+    // case, uart_rx at 3 cycles per bit.
+    parameter FIFO_DEPTH = 4
 ) (
     input  wire               clk,
     input  wire               rst_n,
@@ -43,12 +46,19 @@ module stt_chip #(
     output wire [7:0]         uio_out,
     output wire [7:0]         uio_oe,
 
-    // TEMPORARY: replaced by stt_hostbuf. Not part of the TT boundary.
-    input  wire [NSM*SR_W-1:0] tx_data,
-    input  wire [NSM-1:0]      tx_ne,
-    output wire [NSM-1:0]      tx_pop,
-    output wire [NSM*SR_W-1:0] rx_data,
-    output wire [NSM-1:0]      rx_push,
+    // Host byte port. Still brought out as ports rather than reaching actual
+    // pins: giving the host pins needs the iomux to reserve some, which output
+    // select code 15 is free to express (there are 15 drivers, 0..14). That is
+    // the next step.
+    input  wire [2:0]          host_sel,
+    input  wire                host_tx_we,
+    input  wire [SR_W-1:0]     host_tx_data,
+    output wire                host_tx_full,
+    input  wire                host_rx_re,
+    output wire [SR_W-1:0]     host_rx_data,
+    output wire                host_rx_ne,
+    output wire [NSM-1:0]      dbg_rx_ovf,
+    output wire [NSM-1:0]      dbg_tx_unf,
 
     // observability for the lockstep testbench
     output wire [NSM*ADDR_W-1:0]  dbg_row,
@@ -97,6 +107,21 @@ module stt_chip #(
 
   wire [NSM*NSLOT-1:0] sm_out, sm_oe;
   wire [NSM*NIN-1:0]   sm_in;
+
+  wire [NSM*SR_W-1:0] tx_data, rx_data;
+  wire [NSM-1:0]      tx_ne, tx_pop, rx_push;
+
+  stt_hostbuf #(.NSM(NSM), .SR_W(SR_W), .DEPTH(FIFO_DEPTH)) u_hostbuf (
+      .clk(clk), .rst_n(rst_n),
+      .tx_data(tx_data), .tx_ne(tx_ne), .tx_pop(tx_pop),
+      .rx_data(rx_data), .rx_push(rx_push),
+      .host_sel(host_sel),
+      .host_tx_we(host_tx_we), .host_tx_data(host_tx_data),
+      .host_tx_full(host_tx_full),
+      .host_rx_re(host_rx_re), .host_rx_data(host_rx_data),
+      .host_rx_ne(host_rx_ne),
+      .rx_ovf(dbg_rx_ovf), .tx_unf(dbg_tx_unf)
+  );
 
   stt_array #(.NSM(NSM), .ROW_W(ROW_W), .ROWS(ROWS), .ADDR_W(ADDR_W),
               .SR_W(SR_W), .CNT_W(CNT_W), .TIMER_W(TIMER_W), .NSLOT(NSLOT),

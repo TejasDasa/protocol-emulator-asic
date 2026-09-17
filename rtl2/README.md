@@ -28,13 +28,16 @@ area study reproducible. This is a separate implementation, not an extension.
 
 ## Deliberately NOT implemented
 
-Still absent rather than half-built: `stt_hostbuf`, `crc_lfsr16`,
-`bit_stuffer`, and the reserved codes of SPEC §9. Until the shared host FIFOs
-exist, `stt_chip` brings the per-machine host byte interface out as ports, which
-is NOT TT-legal -- the real top has only `ui_in`/`uo_out`/`uio`.
+Still absent rather than half-built: `crc_lfsr16`, `bit_stuffer`, and the
+reserved codes of SPEC §9.
+
+The host byte port is brought out as module ports rather than reaching real
+pins. Giving the host pins needs the iomux to reserve some, which output select
+code 15 is free to express -- there are 15 drivers, 0..14 -- and that is the next
+step.
 
 Done since: replication to five machines, `stt_iomux` with the pin-assignment
-chain, and the `run` flag.
+chain, the `run` flag, and per-machine host FIFOs.
 
 Both memories are built and both pass every suite: `stt_imem.v` is a
 behavioural array, `stt_imem_cfgmem.v` drives two real `CFGMEM_IHP16` macros.
@@ -350,6 +353,57 @@ Two were in the testbench: the host byte interface was not driven, and `ui_in`
 was set *before* stepping the model rather than after. The second is subtle —
 invisible for any machine reading an external driver, and caught only by I²C,
 because I²C reads the same wires it drives.
+
+## Host buffering
+
+`stt_hostbuf.v` gives every machine its own TX and RX byte FIFO, built from
+`stt_fifo.v`. SPEC §9 pins the depth at **4** and specifies overflow and
+underflow; both were open items in §16 and are now closed.
+
+**Per machine, not shared**, and that is correctness rather than preference. The
+models give every `SttCore` its own queues. A shared buffer with round-robin
+arbitration — which `rtl/stt_hostbuf.v` implements and the area study priced —
+loses a machine's `push` on any cycle it loses the arbiter, and §8.1 forbids
+stalling to retry. Cycle-exact lockstep against a per-machine model could not
+hold, and that lockstep is what the whole rtl2 effort rests on. The cost is
+5 × 2 × 4 × 8 = 320 storage flops plus pointers against roughly 100 shared.
+
+**Why 4.** Measured at each program's minimum working bit period, the binding
+case is the fastest *receiver*, not the slowest protocol:
+
+| protocol | dir | min cyc/bit | cyc/byte | depth-4 budget |
+|---|---|---|---|---|
+| **uart_rx** | **RX** | **3** | **30** | **120 cycles** |
+| spi | both | 6.525 | 52.2 | 209 |
+| i2c | both | 5.875 | 52.9 | 212 |
+
+So depth 4 gives a host 120 cycles — 2.55 µs at the 47 MHz of §14 — to service a
+byte. `FIFO_DEPTH` is a parameter.
+
+> A capture mode pushing one entry per *edge* would not be served by more depth:
+> an edge can arrive every 3 cycles, so depth 4 gives 12 and even depth 32 gives
+> 96. That capability needs different machinery, not a bigger FIFO.
+
+### What the tests cover, and what they cannot
+
+`tb/test_chip.py` exercises the FIFOs in traffic: the host services one machine
+per cycle round-robin, topping up TX and draining RX, and every drained byte is
+checked against the model's push order. But **it never fills a FIFO** — that is
+precisely what depth 4 buys — so the boundary behaviour has no coverage there.
+
+`tb/test_fifo.py` drives `stt_hostbuf` directly for that: exactly DEPTH bytes
+fit, a write to a full FIFO is dropped and leaves the contents **in order**
+rather than overwriting the oldest, a pop from empty is a no-op, both set sticky
+flags that stay set, the flags are **per machine**, and reset clears them.
+
+### The benchmarks queue more than the hardware holds
+
+`uart_tx` drops all 7 payload bytes into an unbounded model queue on cycle 0,
+against a 4-deep FIFO. `test_chip.py` therefore intercepts whatever the
+benchmark's host device queues and releases it to **both sides together** as the
+hardware has room, so the two queues stay identical and the lockstep stays exact.
+The interception runs every cycle, not once up front — the device fires inside
+the loop.
 
 ## Running the tests
 

@@ -253,7 +253,7 @@ rtl2-mutants:
 	@cd rtl2 && $(COCOTB_PY) tb/run_mutants.py
 rtl2-random:
 	@cd rtl2 && $(COCOTB_PY) tb/run_random.py
-rtl2-full: rtl2-isa-check rtl2-latch rtl2-test rtl2-mutants rtl2-random rtl2-multi rtl2-chip rtl2-slope
+rtl2-full: rtl2-isa-check rtl2-latch rtl2-test rtl2-mutants rtl2-random rtl2-multi rtl2-fifo rtl2-chip rtl2-slope
 
 # Replication: NSM independent machines. rtl2-multi loads a DIFFERENT reference
 # program into each and checks every one against its own model each cycle, so a
@@ -277,3 +277,10 @@ rtl2-slope: lib-check
 .PHONY: rtl2-chip
 rtl2-chip:
 	@cd rtl2 && $(COCOTB_PY) tb/run_chip.py
+
+# Directed hostbuf test: depth, overflow, underflow, sticky flags. The chip
+# test never fills a FIFO -- that is what depth 4 is for -- so the boundary
+# behaviour SPEC section 9 specifies needs its own test.
+.PHONY: rtl2-fifo
+rtl2-fifo:
+	@cd rtl2 && $(COCOTB_PY) tb/run_fifo.py

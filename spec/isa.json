@@ -51,6 +51,15 @@
 
   "_load_protocol_note": "Section 10. These are consequences of CFGMEM_IHP16 being a shift chain rather than a random-access array, not design choices. Confirmed three ways: the DFFRAM netlist has SLICE[i].STORAGE with .D(Di0_in[i]) and .Q(Di0_in[i+1]); prism's reference model is 'row 0 takes Di0, row i takes row i-1'; and prism's loader FSM comment says a write takes DEPTH*3 clocks to walk the WROW pulses.",
 
+  "fifo": {
+    "depth": 4,
+    "width_bits": 8,
+    "per_machine": true,
+    "binding_case": "uart_rx at 3 cycles per bit, 10 bits per byte = a byte every 30 cycles",
+    "host_latency_cycles": 120,
+    "note": "Per machine rather than shared: the models give every SttCore its own queues, and a shared buffer with arbitration would lose a push on a cycle a machine loses the arbiter, which SPEC 8.1 forbids retrying. Depth is a parameter."
+  },
+
   "load_protocol": {
     "row_bits": 32,
     "rows": 32,

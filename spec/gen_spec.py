@@ -186,6 +186,17 @@ def blocks(spec):
           f"**{lp['rows'] * (lp['row_bits'] + lp['walk_clocks_per_row'])} cycles**"]]
     )
 
+    f = spec["fifo"]
+    b["fifo"] = table(
+        ["property", "value"],
+        [["depth", f"{f['depth']} entries"],
+         ["width", f"{f['width_bits']} bits"],
+         ["scope", "per state machine" if f["per_machine"] else "shared"],
+         ["binding case", f["binding_case"]],
+         ["host latency at depth "
+          f"{f['depth']}", f"{f['host_latency_cycles']} cycles"]]
+    )
+
     return b
 
 
