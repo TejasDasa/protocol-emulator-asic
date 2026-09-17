@@ -104,24 +104,31 @@ async def imem_load_readback(dut):
         # path returns. Each row branches to the next, so 32 cycles visit all.
         dut.en.value = 1
         await settle(dut)
-        seen = set()
+        seen = {}
         for step in range(NROWS):
             addr = i_(dut.dbg_row, "dbg_row")
-            got = i_(dut.row, "row")
-            assert got == words[addr], (
-                f"{pname}: address {addr} reads 0x{got:08x}, "
-                f"expected 0x{words[addr]:08x} "
-                f"(payload bits differ: 0x{(got >> 14) ^ (words[addr] >> 14):05x})")
-            seen.add(addr)
+            seen[addr] = i_(dut.row, "row")
             checked += 1
             await RisingEdge(dut.clk)
             await settle(dut)
+
+        bad = {a: g for a, g in seen.items() if g != words[a]}
+        if bad:
+            lines = [f"{pname}: {len(bad)} of {len(seen)} addresses wrong"]
+            for a in sorted(seen):
+                mark = "  <-- WRONG" if a in bad else ""
+                where = [j for j, wv in enumerate(words) if wv == seen[a]]
+                lines.append(f"    addr {a:2d}: read 0x{seen[a]:08x}  "
+                             f"expected 0x{words[a]:08x}"
+                             f"{' (that is word ' + str(where) + ')' if where else ''}"
+                             f"{mark}")
+            raise AssertionError("\n".join(lines[:20]))
         dut.en.value = 0
         await settle(dut)
 
-        assert seen == set(range(NROWS)), (
+        assert set(seen) == set(range(NROWS)), (
             f"{pname}: the walk visited {len(seen)} of {NROWS} addresses, "
-            f"missing {sorted(set(range(NROWS)) - seen)}")
+            f"missing {sorted(set(range(NROWS)) - set(seen))}")
         dut._log.info(f"{pname}: all {NROWS} addresses written and read back correctly")
 
     dut._log.info(f"imem load path: {checked} address reads checked across "

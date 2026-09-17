@@ -47,25 +47,31 @@ class RandomStimulus:
 
 
 def build(seed):
-    rng = random.Random(seed)
-    words = random_words(rng)
+    """Everything about program `seed` is drawn from streams keyed on `seed`, so
+    it is reproducible on its own and independent of every other program and of
+    how any other field is generated. See randprog.field_rng."""
+    def c(name):
+        return random.Random(f"{seed}:cfg:{name}")
+
+    words = random_words(seed)
     prog = decode(words)
     w = World([(n, 0) for n in OUTS] + [(n, 1) for n in INS])
-    w.devices = [RandomStimulus(rng)]
-    for _ in range(rng.randrange(1, 6)):
-        w.tx_fifo.append(rng.randrange(256))
+    w.devices = [RandomStimulus(random.Random(f"{seed}:stim"))]
+    for j in range(c("ndata").randrange(1, 6)):
+        w.tx_fifo.append(random.Random(f"{seed}:data:{j}").randrange(256))
     core = SttCore(
         prog,
         slots=[(n, "pp") for n in OUTS],
         ins=list(INS),
-        period=rng.choice([2, 3, 4, 8, 16]),
-        shift=rng.choice(["left", "right"]),
-        fill=rng.choice(["0", "1", "in0"]),
+        period=c("period").choice([2, 3, 4, 8, 16]),
+        shift=c("shift").choice(["left", "right"]),
+        fill=c("fill").choice(["0", "1", "in0"]),
         sr_width=8,
-        cload=(rng.randrange(256), rng.randrange(256), rng.randrange(256)),
-        c2load=rng.randrange(256),
-        loadk=rng.randrange(256),
-        init_pins=[rng.randrange(2) for _ in OUTS],
+        cload=(c("ca").randrange(256), c("cb").randrange(256),
+               c("cc").randrange(256)),
+        c2load=c("c2").randrange(256),
+        loadk=c("k").randrange(256),
+        init_pins=[c(f"init{i}").randrange(2) for i in range(len(OUTS))],
     )
     return core, prog, w, words
 

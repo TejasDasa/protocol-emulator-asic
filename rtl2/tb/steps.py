@@ -14,6 +14,8 @@ from cocotb.triggers import RisingEdge, Timer
 
 from lockstep import CFG_BITS, config_word
 
+STT_ROWS = 32
+
 PERIOD_NS = 10
 FIELDS = ("row", "link", "sr", "cnt", "c2", "crc", "tcount", "pinv")
 
@@ -47,10 +49,24 @@ async def settle(dut):
 
 
 async def shift_in(dut, enable_sig, bits, nbits):
-    """Present `nbits` of `bits` on ld_in, LSB first, one per cycle."""
+    """Present `nbits` of `bits` on ld_in, LSB first, one per cycle.
+
+    Pauses whenever imem_ld_busy is high. With the behavioural array it never
+    is; with the CFGMEM macros it is for 48 cycles after every row, while the
+    loader walks a one-hot enable down the latch chain. The host protocol has to
+    honour that, so the testbench does too.
+    """
     for i in range(nbits):
+        while hasattr(dut, "imem_ld_busy") and int(dut.imem_ld_busy.value) == 1:
+            enable_sig.value = 0
+            await RisingEdge(dut.clk)
+            await settle(dut)
         enable_sig.value = 1
         dut.ld_in.value = (bits >> i) & 1
+        await RisingEdge(dut.clk)
+        await settle(dut)
+    while hasattr(dut, "imem_ld_busy") and int(dut.imem_ld_busy.value) == 1:
+        enable_sig.value = 0
         await RisingEdge(dut.clk)
         await settle(dut)
     enable_sig.value = 0
@@ -89,10 +105,20 @@ async def reset_and_load(dut, core, words, w):
     await settle(dut)
 
     await shift_in(dut, dut.cfg_ld_en, config_word(core), CFG_BITS)
+
+    # EVERY TILE MUST RECEIVE A FULL 16 WORDS.
+    #
+    # The macro is a shift chain, so writing k words into a tile leaves them at
+    # chain rows 0..k-1, and the read mapping (address a at chain row 15-a) only
+    # holds when k is 16. A short program loaded as-is reads back scrambled.
+    # Padding to the full 32 rows is the fix and costs nothing: the imem is 32
+    # rows regardless, and rows a program never branches to are never executed.
+    # This is a host-protocol consequence of the macro, like ld_busy.
+    padded = list(words) + [0] * (STT_ROWS - len(words))
     prog_bits = 0
-    for i, word in enumerate(words):
+    for i, word in enumerate(padded):
         prog_bits |= word << (32 * i)
-    await shift_in(dut, dut.imem_ld_en, prog_bits, 32 * len(words))
+    await shift_in(dut, dut.imem_ld_en, prog_bits, 32 * len(padded))
 
     # en high, but do NOT clock here: the first edge the machine sees must be
     # the one inside the loop, so that RTL cycle 0 is model cycle 0.

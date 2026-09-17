@@ -1,0 +1,28 @@
+# rtl2 with the instruction memory in CFGMEM_IHP16 macros.
+#
+# The macro is a blackbox here: its area is charged separately (28,794.53 um2
+# placed per tile, docs/area-study.md). What this measures is the LOGIC around
+# it, and the number that matters is the flop count -- it should fall by the
+# 1024 storage flops the behavioural array needed, less whatever the walking
+# loader adds.
+# -lib reads the model as a BLACKBOX: its area is charged separately
+# (28,794.53 um2 placed per tile) and what this measures is the logic around it.
+read_verilog -lib cfgmem_ihp16_model.v
+read_verilog -I. -sv stt_config.v stt_imem_cfgmem.v stt_core.v stt_top_cfgmem.v
+hierarchy -top stt_top_cfgmem -check
+proc
+opt_clean
+select -assert-none t:$dlatch
+select -assert-none t:$_DLATCH_*
+select -assert-none t:$_DLATCHSR_*
+log "GATE: no inferred latches in rtl2 (cfgmem)"
+flatten -noscopeinfo
+opt -full
+memory
+opt -full
+techmap
+opt -full
+dfflibmap -liberty @LIB@
+abc -liberty @LIB@
+opt_clean
+stat -liberty @LIB@

@@ -1,15 +1,11 @@
-// stt_top -- one state machine with its imem and configuration register.
+// stt_top_cfgmem -- stt_top with the instruction memory in CFGMEM_IHP16 macros.
 //
-// This is the unit the lockstep testbench drives. It is NOT the chip: there is
-// one state machine, no iomux, no shared host FIFOs, no run flag and no shared
-// units. Those are deliberately out of scope for this pass (see rtl2/README.md);
-// the point here is one machine that is provably correct against the models.
-//
-// Every input of every submodule is driven from a port or from another module.
+// Same ports as stt_top so the lockstep testbenches drive it unchanged: the
+// whole point is that swapping the memory changes nothing observable.
 `default_nettype none
 `include "stt_isa.vh"
 
-module stt_top #(
+module stt_top_cfgmem #(
     parameter ROW_W   = `STT_ROW_W,
     parameter ROWS    = `STT_ROWS,
     parameter ADDR_W  = `STT_ADDR_W,
@@ -22,8 +18,6 @@ module stt_top #(
     input  wire               clk,
     input  wire               rst_n,
     input  wire               en,
-
-    // serial load
     input  wire               imem_ld_en,
     input  wire               cfg_ld_en,
     input  wire               ld_in,
@@ -31,20 +25,14 @@ module stt_top #(
     output wire               cfg_ld_out,
     output wire [ADDR_W-1:0]  imem_ld_addr,
     output wire               imem_ld_busy,
-
-    // host byte interface
     input  wire [SR_W-1:0]    tx_data,
     input  wire               tx_ne,
     output wire               tx_pop,
     output wire [SR_W-1:0]    rx_data,
     output wire               rx_push,
-
-    // pins
     input  wire [NIN-1:0]     pin_in,
     output wire [NSLOT-1:0]   pin_out,
     output wire [NSLOT-1:0]   pin_oe,
-
-    // observability for the lockstep testbench
     output wire [ADDR_W-1:0]  dbg_row,
     output wire [SR_W-1:0]    dbg_sr,
     output wire [CNT_W-1:0]   dbg_cnt,
@@ -76,7 +64,7 @@ module stt_top #(
       .cfg_od_mask(cfg_od_mask)
   );
 
-  stt_imem #(.ROW_W(ROW_W), .ROWS(ROWS), .ADDR_W(ADDR_W))
+  stt_imem_cfgmem #(.ROW_W(ROW_W), .ROWS(ROWS), .ADDR_W(ADDR_W))
   u_imem (
       .clk(clk), .rst_n(rst_n),
       .addr(dbg_row), .row(row),

@@ -33,13 +33,12 @@ machines, `stt_iomux` and the pin-assignment chain, `stt_hostbuf`, the `run`
 flag (SPEC §11.1), `crc_lfsr16`, `bit_stuffer`, and the reserved codes of SPEC
 §9. Those come after one machine is proven.
 
-The imem is a **behavioural array**, not two `CFGMEM_IHP16` macros. The load
-path around it is not behavioural — the staging register, bit counter and write
-pointer are exactly the logic SPEC §12 says the tiles do not provide, so
-swapping the array for the macros must not change behaviour. The read is
-asynchronous, which SPEC §12 requires and the macro's own liberty confirms: no
-`CLK` pin, no `ff()` or `latch()` groups, all 224 timing arcs
-`timing_type : combinational`, worst address-to-data 1.994 ns.
+Both memories are built and both pass every suite: `stt_imem.v` is a
+behavioural array, `stt_imem_cfgmem.v` drives two real `CFGMEM_IHP16` macros.
+See "The CFGMEM_IHP16 swap" below. The read is asynchronous either way, which
+SPEC §12 requires and the macro's liberty confirms: no `CLK` pin, no `ff()` or
+`latch()` groups, all 224 timing arcs `timing_type : combinational`, worst
+address-to-data 1.994 ns.
 
 ## Verification: lockstep, not expectation
 
@@ -189,6 +188,65 @@ the macros instead.
 Verified in both directions: deleting the default assignment in the pin-op block
 makes it fail with `Assertion failed: selection is not empty: t:$dlatch`.
 
+## The CFGMEM_IHP16 swap
+
+`IMEM=cfgmem` builds `stt_top_cfgmem` with the memory in two `CFGMEM_IHP16`
+macros instead of the behavioural array. Every suite runs unchanged on both,
+which is the point: the swap must change nothing observable.
+
+| suite | behavioural | CFGMEM macros |
+|---|---|---|
+| 6 reference programs | 13,459 cycles, no divergence | same, no divergence |
+| imem load path | 192 address reads, 6 patterns | same |
+| random 32-row programs | 40/40, 49/49 codes | same |
+| mutants | 542, 0 divergences | same |
+
+**Flop count, which is the check that the swap actually reached the macro:**
+
+| | flops | logic area |
+|---|---|---|
+| behavioural array | 1197 | 94,583.16 µm² |
+| CFGMEM macros | **213** | 20,548.42 µm² (macros charged separately) |
+
+A drop of **984** — the 1024 storage flops removed, less the ~40 the walking
+loader adds. Had it come back near 1197 the macro had not been blackboxed; near
+173, the loader had not synthesised.
+
+### What the macro actually is, and what that cost
+
+`CFGMEM_IHP16` is a **shift chain, not a random-access array**. Only row 0 can
+be written from `Di0`; every other row takes its predecessor. See SPEC §10 for
+the three confirmations and the resulting host protocol.
+
+Three write schemes were tried and the directed test rejected the first two:
+
+1. **one-hot `WROW`** — what `rtl/stt_imem_cfgmem.v` does. Copies the previous
+   row into the selected one. Cannot work at all.
+2. **all rows open** — the value ripples down the whole chain in one strobe.
+3. **even/odd two-phase** — whichever half runs second reads rows the first half
+   already updated.
+
+What works is prism's: walk a one-hot enable from row 15 **down** to row 0,
+three clocks apiece, so each row is written while its source still holds the old
+value. 48 cycles per row, during which `ld_busy` is high.
+
+The second requirement took a second failure to find. After the walk was right,
+five of six reference programs still failed — and the pattern named the cause:
+
+| | rows | result |
+|---|---|---|
+| random programs | 32 | pass |
+| USB | **16** | pass |
+| uart_tx, uart_rx, spi, i2c, jtag | 5, 8, 8, 22, 25 | **fail** |
+
+Everything that passed was a multiple of 16. Writing *k* words into a tile
+leaves them at chain rows 0…*k*−1, so the read mapping only holds when a tile
+gets all 16. Hence the full-load rule: the host loads all 32 rows, padding.
+
+**None of this was visible to the three lockstep suites before the swap.** They
+all load through the same path and visit only rows a program branches to. The
+directed test exists for exactly this, and it found every one of these.
+
 ## Running the tests
 
 Everything needs LibreLane's devshell (iverilog, yosys) plus the cocotb venv:
@@ -210,8 +268,13 @@ python3 tb/coverage.py
 # one program
 /home/tejas/venv-cocotb/bin/python tb/run_tests.py i2c
 
-# synthesis and the latch gate
-bash rtl2/run_synth.sh
+# the macro variant: every suite, same commands
+IMEM=cfgmem /home/tejas/venv-cocotb/bin/python tb/run_tests.py
+IMEM=cfgmem /home/tejas/venv-cocotb/bin/python tb/run_imem.py
+
+# synthesis and the latch gate, either variant
+bash rtl2/run_synth.sh          # behavioural
+bash rtl2/run_synth_cfgmem.sh   # macros blackboxed
 ```
 
 `make check` runs the two gates that need no simulator: the generated-header
@@ -231,6 +294,9 @@ failing run.
 | `stt_isa.vh` | **generated** from `spec/isa.json` by `gen_isa_vh.py`; never edit |
 | `stt_core.v` | the SPEC §8.1 cycle |
 | `stt_imem.v` | 32x32 behavioural array plus the SPEC §12 load path |
+| `stt_imem_cfgmem.v` | the same, driving two `CFGMEM_IHP16` macros |
+| `cfgmem_ihp16_model.v` | simulation model of the macro; synthesis uses the real one |
+| `stt_top_cfgmem.v` | top with the macro-backed memory |
 | `stt_config.v` | the SPEC §2 configuration list as one serial chain |
 | `stt_top.v` | the three wired together; the unit the testbench drives |
 | `tb/lockstep.py` | benchmark capture and the configuration bit map |

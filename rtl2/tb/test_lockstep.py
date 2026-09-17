@@ -33,9 +33,9 @@ async def lockstep(dut):
     cocotb.start_soon(Clock(dut.clk, PERIOD_NS, unit="ns").start())
     await reset_and_load(dut, core, words, w)
 
-    assert int(dut.imem_ld_addr.value) == len(words) % 32, (
-        f"write pointer is {int(dut.imem_ld_addr.value)} after "
-        f"loading {len(words)} rows")
+    assert int(dut.imem_ld_addr.value) == 0, (
+        f"write pointer is {int(dut.imem_ld_addr.value)} after loading a full "
+        f"32 rows; it should have wrapped to 0")
 
     cycles, finished = await run_lockstep(dut, core, w, done, max_cycles, name,
                                           len(core.slots), words)

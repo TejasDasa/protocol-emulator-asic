@@ -48,37 +48,53 @@ def pack(fields):
     return v
 
 
-def random_words(rng, nrows=NROWS, p_ret=0.08):
+def field_rng(seed, row, field):
+    """An independent stream per (program, row, field).
+
+    Drawing every field from one sequential stream means that changing HOW any
+    field is chosen shifts every draw after it, so program 37 becomes a
+    different program and unrelated failures appear at the same moment as the
+    change. That happened once: enabling RET on all four modes added a draw per
+    row, reshuffled every program, and surfaced four cycle-0 failures that
+    looked caused by RET and were not. With a sub-stream per field, program 37
+    is the same program regardless of what changed upstream, so a new failure
+    means a new bug.
+    """
+    return random.Random(f"{seed}:{row}:{field}")
+
+
+def random_words(seed, nrows=NROWS, p_ret=0.08):
     """One random encoded row per index, all fields legal."""
     words = []
     for i in range(nrows):
-        mode = rng.randrange(4)
+        r = lambda f: field_rng(seed, i, f)
+        mode = r("mode").randrange(4)
         # RET is generated on every mode, including SKIP, where SPEC section 5
         # feeds the target field to the FALSE exit. SttCore used to raise
         # KeyError on that row because it resolved "ret" only on the true exit;
         # it now applies the same rule to either exit, so the case is testable.
-        if rng.random() < p_ret:
+        if r("ret").random() < p_ret:
             target = RET
         else:
-            target = rng.randrange(nrows)
+            target = r("target").randrange(nrows)
 
-        slot = rng.randrange(4)
+        slot = r("slot").randrange(4)
         # d0/d1 on a single slot is rejected by the encoder (SPEC section 7),
         # so a program cannot express it and neither does this.
         ops = list(range(NPINOPS))
         if slot != 3:
             ops = [o for o in ops if PINOP_NAME[o] not in ("d0", "d1")]
         words.append(pack({
-            "test": rng.randrange(NTESTS),
+            "test": r("test").randrange(NTESTS),
             "mode": mode,
             "target": target,
             "pin_slot": slot,
-            "pin_op": rng.choice(ops),
-            "act_sr": rng.randrange(GROUPS[0][1]),
-            "act_c1": rng.randrange(GROUPS[1][1]),
-            "act_c2": rng.randrange(GROUPS[2][1]),
-            "act_tm": rng.randrange(GROUPS[3][1]),
-            "act_xx": rng.randrange(GROUPS[4][1]),
+            "pin_op": r("pin_op").choice(ops),
+            "act_sr": r("act_sr").randrange(GROUPS[0][1]),
+            "act_c1": r("act_c1").randrange(GROUPS[1][1]),
+            "act_c2": r("act_c2").randrange(GROUPS[2][1]),
+            "act_tm": r("act_tm").randrange(GROUPS[3][1]),
+            "act_xx": r("act_xx").randrange(GROUPS[4][1]),
         }))
     return words
 

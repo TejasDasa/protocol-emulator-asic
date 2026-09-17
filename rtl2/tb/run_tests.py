@@ -18,8 +18,35 @@ BENCH = os.path.abspath(os.path.join(RTL, "..", "isa_bench"))
 from cocotb_tools.runner import get_runner
 
 PROGRAMS = ["uart_tx", "uart_rx", "spi", "i2c", "usb", "jtag"]
-SOURCES = ["stt_config.v", "stt_imem.v", "stt_core.v", "stt_top.v"]
 TIMESCALE = ("1ns", "1ps")
+
+# IMEM=cfgmem swaps the behavioural array for two CFGMEM_IHP16 macros, using the
+# REAL DFFRAM netlist and the PDK's own cell models rather than a hand-written
+# stand-in -- a stand-in would only prove the stand-in matches the RTL. The
+# suites are identical either way, which is the point: the swap must change
+# nothing observable.
+MACRO_NL = os.environ.get(
+    "MACRO_NL",
+    os.path.abspath(os.path.join(RTL, "..", "floorplan", "macro",
+                                 "CFGMEM_IHP16.nl.v")))
+PDK_V = os.environ.get(
+    "PDK_V", "/home/tejas/pdk/ihp-sg13cmos5l/libs.ref/sg13cmos5l_stdcell/verilog")
+
+
+def sources_and_top():
+    """(verilog sources, toplevel) for the selected imem implementation."""
+    if os.environ.get("IMEM", "behavioural") == "cfgmem":
+        return ([os.path.join(RTL, s) for s in
+                 ("cfgmem_ihp16_model.v", "stt_config.v", "stt_imem_cfgmem.v",
+                  "stt_core.v", "stt_top_cfgmem.v")],
+                "stt_top_cfgmem")
+    return ([os.path.join(RTL, s) for s in
+             ("stt_config.v", "stt_imem.v", "stt_core.v", "stt_top.v")],
+            "stt_top")
+
+
+# kept for callers that only need the plain list
+SOURCES = ["stt_config.v", "stt_imem.v", "stt_core.v", "stt_top.v"]
 
 
 def failures(xml_path):
@@ -43,21 +70,19 @@ def failures(xml_path):
 
 def main():
     want = sys.argv[1:] or PROGRAMS
+    srcs, top = sources_and_top()
     runner = get_runner("icarus")
     runner.build(
-        verilog_sources=[os.path.join(RTL, s) for s in SOURCES],
-        includes=[RTL],
-        hdl_toplevel="stt_top",
+        verilog_sources=srcs, includes=[RTL], hdl_toplevel=top,
         build_dir=os.path.join(RTL, "sim_build"),
-        build_args=["-g2012", "-Wall"],
-        timescale=TIMESCALE,
-        always=True,
+        build_args=["-g2012", "-Wall", "-gno-specify"],
+        timescale=TIMESCALE, always=True,
     )
     bad = []
     for p in want:
         print(f"\n=== lockstep: {p} " + "=" * (56 - len(p)))
         xml = runner.test(
-            hdl_toplevel="stt_top",
+            hdl_toplevel=top,
             test_module="test_lockstep",
             test_dir=HERE,
             build_dir=os.path.join(RTL, "sim_build"),

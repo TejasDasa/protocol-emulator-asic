@@ -695,12 +695,64 @@ is specified, and `push` onto a full RX FIFO is not modelled at all. See §16.
 **SPECIFIED — program load.** The imem is written by a **serial shift-in**. The
 host presents one bit per cycle with the load enable asserted. A staging
 register assembles a row least-significant bit first, matching `rowenc.pack`;
-when the bit counter wraps, the staged row is written to the address in the
-write pointer and the pointer advances. Traced to `rtl/stt_imem.v` and
-`rtl/stt_imem_cfgmem.v`, whose load paths are identical.
+when the bit counter wraps, the staged row is written and the write pointer
+advances.
 
-Loading therefore starts at row 0 and proceeds in order; there is no random
-access and no read-back path.
+<!-- BEGIN GENERATED: load-protocol -->
+<!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
+
+| requirement   | rule                                                                                                                                                                                                 |
+|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **bit order** | One bit per cycle with the load enable asserted, least-significant bit of the row first.                                                                                                             |
+| **busy**      | After each 32-bit row the loader walks a one-hot enable down the latch chain, 16 rows x 3 clocks = 48 cycles, and asserts `ld_busy`. The host MUST NOT present the next bit while `ld_busy` is high. |
+| **full load** | The host MUST load all 32 rows, padding beyond the program's length. A tile that receives fewer than 16 words holds them at the wrong chain positions and reads back scrambled.                      |
+| **order**     | Rows are loaded in ascending address order starting at row 0. There is no random access and no read-back path.                                                                                       |
+
+| quantity                  | value           |
+|---------------------------|-----------------|
+| row width                 | 32 bits         |
+| imem depth                | 32 rows         |
+| tiles                     | 2 x 16 words    |
+| walk after each row       | 48 cycles       |
+| shift-in per row          | 32 cycles       |
+| **total to load 32 rows** | **2560 cycles** |
+
+<!-- END GENERATED: load-protocol -->
+
+**Why there is a busy signal and a full-load rule.** Both are consequences of
+what `CFGMEM_IHP16` is, not choices. The macro is a **shift chain, not a
+random-access array**: only row 0 can be written from `Di0`, and every other row
+takes its predecessor. Three independent confirmations —
+
+- the DFFRAM netlist: `SLICE[i].STORAGE` has `.D(Di0_in[i])`, `.Q(Di0_in[i+1])`;
+- prism's reference model (`src/user_peripherals/cfgmem/cfgmem.v`):
+  `le = WROW & {16{WE0}}`, row 0 takes `Di0`, row *i* takes row *i−1*;
+- prism's loader comment: a write "takes DEPTH\*3 clocks to walk the WROW
+  pulses".
+
+So a row is written by walking a one-hot enable from row 15 **down** to row 0 —
+backwards, so each row is written while its source still holds the old value.
+Opening every row at once ripples the value down the whole chain; an even/odd
+two-phase split fails because whichever half runs second reads rows the first
+half already updated. Both were tried and `rtl2/tb/test_imem.py` rejected both.
+
+The full-load rule has the same origin. Writing *k* words into a tile leaves
+them at chain rows 0…*k*−1, so the read mapping — address *a* at chain row
+15−*a* — holds only when a tile receives all 16. A short program loaded as-is
+reads back scrambled. Padding costs nothing: the imem is 32 rows whatever the
+program's length, and rows a program never branches to are never executed.
+
+> This was found by swapping the behavioural memory for the macro and running
+> the existing suites. The failure pattern named the cause: the six reference
+> programs failed **except USB**, which has exactly 16 rows, and the random
+> programs, which all have 32. Everything that passed was a multiple of 16.
+
+**CURRENT BEHAVIOUR — the structural RTL cannot do this.**
+`rtl/stt_imem_cfgmem.v` drives a **one-hot** `WROW` as though the macro were a
+random-access array. Against a shift chain that copies the previous row into the
+selected one instead of writing it, so that module would not work at all. It was
+synthesised for area and never simulated (§16.2). `rtl2/stt_imem_cfgmem.v` is
+the working implementation.
 
 **SPECIFIED — state machine select.** When more than one state machine is
 present, `uio_in[7:5]` selects which one the load enables address, so exactly
@@ -713,6 +765,19 @@ one is programmed at a time. Traced to `rtl/stt_chip.v`.
 
 **SPECIFIED — configuration load.** The per-state-machine configuration of §2 is
 written by the same kind of serial chain, with its own enable.
+
+**SPECIFIED — bring-up order.** A state machine must not be enabled until its
+inputs have been stable for **at least two cycles**, because the input
+synchronizer resets to 0 and reads every input low until then (§8.3). Enabling
+earlier makes the machine's first two cycles act on inputs that read low
+whatever the pins are doing, which for a `WAIT` on `in0l` means taking the exit
+immediately.
+
+In practice this costs nothing and needs no delay loop: configuration and
+program are shifted in first, which takes 69 + 32 x *rows* cycles — hundreds —
+and the synchronizer tracks the pins throughout. The requirement is stated
+because a bring-up sequence that enabled a machine straight out of reset, with
+the program already resident, would violate it.
 
 **CURRENT BEHAVIOUR — run/halt and reconfiguration.** `stt_chip.v` has an
 `ena` input that gates execution, and the load enables are separate from it, so
@@ -1033,6 +1098,7 @@ and where the evidence stops.
 | **Inter-pin skew** | The model has no pin path. Skew between a clock and its data — SCK/MOSI, SCL/SDA — is the failure mode that matters in silicon and is entirely unmeasured. |
 | **Multi-state-machine floorplan** | RUN. Five machines and ten macros place and route with zero router DRC errors, and all ten macros are geometrically verified as powered from the routed DEF. Six machines could not be made to route at any placement density or macro grouping. Signoff DRC and LVS are still owed: the flow stopped at IR-drop analysis on a plugin connectivity gap (`floorplan/README.md`). |
 | **The input select path and the `run` flag** | §11.1 specifies per-machine input selects and a `run` flag that releases the control pins during operation. `rtl/stt_iomux.v` implements neither: inputs are a fixed tap that collides with the control pins, and `rtl/stt_chip.v` decodes control unconditionally. Specified, unimplemented. |
+| **`rtl/stt_imem_cfgmem.v` cannot work** | It drives a one-hot `WROW` as though CFGMEM_IHP16 were a random-access array. It is a shift chain, so that copies the previous row into the selected one instead of writing it (§10). Synthesised for area, never simulated. `rtl2/` has the working version. |
 | **The structural RTL** | `rtl/` was written to measure area. It implements the *previous* row format (21-bit, 5-bit target, palette) and has never passed a functional test. It is not an implementation of this specification. |
 
 ### 16.3 Reachable but unexercised

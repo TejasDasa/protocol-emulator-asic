@@ -171,6 +171,21 @@ def blocks(spec):
         [[f"`{c['pin']}`", c["role"]] for c in pm["config_mode_pins"]]
     )
 
+    lp = spec["load_protocol"]
+    b["load-protocol"] = table(
+        ["requirement", "rule"],
+        [[f"**{r['name']}**", r["rule"]] for r in lp["requirements"]]
+    ) + "\n\n" + table(
+        ["quantity", "value"],
+        [["row width", f"{lp['row_bits']} bits"],
+         ["imem depth", f"{lp['rows']} rows"],
+         ["tiles", f"{lp['tiles']} x {lp['words_per_tile']} words"],
+         ["walk after each row", f"{lp['walk_clocks_per_row']} cycles"],
+         ["shift-in per row", f"{lp['row_bits']} cycles"],
+         ["**total to load 32 rows**",
+          f"**{lp['rows'] * (lp['row_bits'] + lp['walk_clocks_per_row'])} cycles**"]]
+    )
+
     return b
 
 

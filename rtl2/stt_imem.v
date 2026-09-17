@@ -35,7 +35,10 @@ module stt_imem #(
     input  wire               ld_en,
     input  wire               ld_in,
     output wire               ld_out,
-    output wire [ADDR_W-1:0]  ld_addr
+    output wire [ADDR_W-1:0]  ld_addr,
+    // Tied low: the behavioural array writes in one cycle and needs no pause.
+    // The CFGMEM version has to walk a one-hot enable down the chain and does.
+    output wire               ld_busy
 );
 
   localparam integer BITC_W = $clog2(ROW_W);
@@ -70,6 +73,7 @@ module stt_imem #(
   assign row     = mem[addr];
   assign ld_out  = stage[0];
   assign ld_addr = wptr;
+  assign ld_busy = 1'b0;
 
 endmodule
 `default_nettype wire
