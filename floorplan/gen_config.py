@@ -167,7 +167,7 @@ cfg = {
     "DESIGN_NAME": "tt_um_stt" if TREE == "D" else "stt_chip_cfgmem",
     "VERILOG_FILES": ["dir::" + f for f in (SRC_D if TREE == "D" else SRC_C)],
     "VERILOG_INCLUDE_DIRS": ["dir::../rtl2" if TREE == "D" else "dir::../rtl"],
-    "VERILOG_DEFINES": ["IMEM_MACRO"] if TREE == "D" else [],
+    "VERILOG_DEFINES": (["IMEM_MACRO", f"STT_NSM={NSM}"] if TREE == "D" else []),
     "CLOCK_PORT": "clk",
     "CLOCK_PERIOD": 20,                      # 50 MHz
     "FP_SIZING": "absolute",

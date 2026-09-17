@@ -11,6 +11,13 @@
 `default_nettype none
 `include "stt_isa.vh"
 
+// Machine count. A define rather than a parameter because the hardening flow
+// sets it from outside and LibreLane has no way to override a top-level
+// parameter, only to pass -D to synthesis.
+`ifndef STT_NSM
+  `define STT_NSM 5
+`endif
+
 module tt_um_stt (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,
@@ -22,7 +29,7 @@ module tt_um_stt (
     input  wire       rst_n
 );
 
-  localparam integer NSM    = 5;
+  localparam integer NSM    = `STT_NSM;
   localparam integer SR_W   = 8;
   localparam integer CNT_W  = 8;
   localparam integer TIMER_W = 16;

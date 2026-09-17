@@ -312,7 +312,14 @@ one.
 **This does not reopen the freeze.** D beats C at every machine count, for the
 reasons in §2, and none of them are area arguments. What changes is not the row
 format but what we plan to build: **the target is now 5 state machines, not 9.**
-The sweep settled it: 6 machines could not be made to route at any placement
+Now settled in the format that ships. Format D hardens at five machines with
+zero router DRC errors and **meets 50 MHz at every corner** (worst setup slack
++1.678 ns slow, against C's −1.266 ns), all ten macros verified powered from the
+routed DEF. Six machines fails global routing in D as it did in C, with 2,846
+GCells of overflow. D is larger per machine than C, so six was never going to
+return. **Five.**
+
+The original sweep, on C: 6 machines could not be made to route at any placement
 density or macro grouping, and 5 places and routes with zero router DRC errors.
 See `floorplan/README.md` for the eight-point sweep and the signoff run.
 
