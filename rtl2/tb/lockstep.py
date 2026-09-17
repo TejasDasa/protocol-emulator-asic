@@ -83,6 +83,14 @@ def capture_benchmark(name, period):
     import jtag_prog
     import programs as P
 
+    # EXPERIMENT: registers the UART detector as a benchmark if it is present.
+    # Additive -- it touches no reference program and is not conformance.
+    try:
+        import detector
+        detector.register()
+    except Exception:
+        pass
+
     stash = {}
     real_run = W.World.run
 
