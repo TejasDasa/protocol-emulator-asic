@@ -228,6 +228,7 @@ check-freeze:
 .PHONY: check-phase
 check-phase:
 	@cd isa_bench && python3 phase_check.py | tail -1
+	@cd isa_bench && python3 phase_sweep.py | tail -1
 
 # A pin assignment that cannot work configures cleanly and then does nothing:
 # a program using `load`, `push` or `fifo` with no pin selecting the host port
