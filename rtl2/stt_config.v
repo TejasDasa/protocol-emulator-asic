@@ -33,7 +33,7 @@ module stt_config #(
     output wire [NSLOT-1:0]   cfg_init_pins,
     output wire [NSLOT-1:0]   cfg_od_mask,    // 1 = open drain (SPEC section 7)
 
-    // SPEC section 9 wider shared units. APPENDED to the field map below, for
+    // SPEC section 9 wider per-machine units. APPENDED to the field map below,
     // the same reason the encoding appends: the host's bit order is a
     // contract, and inserting here would silently re-map every existing field.
     output wire [15:0]        cfg_crc16_poly,

@@ -59,7 +59,7 @@ module stt_core #(
     input  wire [NSLOT-1:0]   cfg_init_pins,
     input  wire [NSLOT-1:0]   cfg_od_mask,
 
-    // SPEC section 9 wider shared units. Both are configuration, not row
+    // SPEC section 9 wider per-machine units. Both are configuration, not row
     // fields: a program picks a polynomial and a stuffing rule once, the way
     // it picks a period.
     input  wire [15:0]        cfg_crc16_poly,

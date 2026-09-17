@@ -430,7 +430,7 @@ through fields that already exist. The per-SM CRC5 is also reachable and used:
 the USB program issues `crcrst` once, `loadcrc` once and `crcstep` three times.
 The gap was the two *wider* units only.
 
-`isa_bench/sharedunits.py` prices the fix. Of 12 control inputs across the two
+That amendment is now implemented; `isa_bench/freeze_check.py` guards it. Of 12 control inputs across the two
 modules, **7 are per-program constants** the existing serial configuration chain
 carries and **5 need a row to say them**. All five fit in codes that were already
 free — `test` 10→11 of 16, `pin_op` 7→8 of 8, `act_xx` 5→8 of 8 — so the
@@ -444,10 +444,18 @@ check-freeze` fails if that stops being true.
 space: `act_xx` and `pin_op` are now full, so a row wanting `crc16step`
 alongside `call`, `crcrst` or `crcstep` must split into two. `act_xx` is already
 non-zero on 8 of 59 reference rows, all in USB. The codes are recorded in
-`spec/isa.json` under `reserved_codes` and specified in `docs/SPEC.md` §9; they
-have **no implementation** — no model, no RTL path, no benchmark — and are held
-outside the tables `spec/conformance.py` checks so that absence is not mistaken
-for drift. Implementing them is RTL-phase work.
+`spec/isa.json` and specified in `docs/SPEC.md` §9. They are now **implemented**
+— in `isa_bench/stt.py`, in `rtl2/`, and exercised as a protocol by the CAN
+transmitter of `isa_bench/can_prog.py` — and `spec/conformance.py` checks them
+alongside every other code.
+
+One thing turned out differently from the pricing above: both units are
+**per state machine, not shared**. The blocks in `rtl/` were written as single
+instances and the configuration C floorplan instantiates one of each for the
+whole chip, but §8.1 forbids that — they hold per-stream state, sharing needs
+arbitration, and arbitration means a machine waits, which §8.1 does not allow.
+That multiplies their cost by the machine count, and is most of why format D
+synthesises **larger** than C at five machines rather than smaller.
 
 ---
 

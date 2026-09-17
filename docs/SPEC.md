@@ -638,7 +638,7 @@ is unmeasured. See §14 and §16.
 
 ---
 
-## 9. Shared units
+## 9. Per-machine units
 
 **SPECIFIED — CRC5, per state machine.** Each state machine has a 5-bit CRC
 register, reset to `0x1F`, driven by three actions:
@@ -651,6 +651,25 @@ register, reset to `0x1F`, driven by three actions:
 
 This is a reflected CRC5 with polynomial `0x14`, which is the USB CRC5
 (x⁵+x²+1, reflected). Traced to `SttCore.step`. It is fixed, not programmable.
+
+**SPECIFIED — every unit in this section is PER STATE MACHINE, not shared.**
+This section used to be called "shared units", because `crc_lfsr16.v` and
+`bit_stuffer.v` were written as single blocks in `rtl/` and the configuration C
+floorplan instantiates one of each for the whole chip. That is not implementable
+and the name was wrong.
+
+Sharing is ruled out by §8.1, not by cost. Both units hold per-stream state — the
+CRC register and the stuffer's run length and last bit — and two machines
+emitting bits into one stuffer would interleave into a single run counter and
+corrupt each other's stuffing. Serializing access needs arbitration, and
+arbitration means one machine waits. §8.1 says a machine never stalls and takes
+exactly one cycle per row, so there is nowhere for that wait to go. Five machines
+running five different protocols is the architecture; a single polynomial and a
+single run counter cannot serve it.
+
+The cost is real and is charged per machine: 22 flops of state in `stt_core`
+(16 of CRC, 6 of stuffer) and 31 in `stt_config` for the polynomial, width,
+direction, seed, threshold and slot routing.
 
 **Context — the four blocks in `rtl/`.** `rtl/` also contains a 16-bit
 programmable-polynomial CRC/LFSR (`crc_lfsr16.v`), a configurable bit stuffer
