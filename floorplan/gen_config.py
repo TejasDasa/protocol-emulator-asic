@@ -57,6 +57,13 @@ LAYOUT  = sys.argv[5] if len(sys.argv) > 5 else "interleaved"
 # detailed routing, not GRT overflow, is the gate that decides submittability.
 ALLOW   = int(sys.argv[6]) if len(sys.argv) > 6 else 0
 SIGNOFF = int(sys.argv[7]) if len(sys.argv) > 7 else 0
+# Which RTL tree. "C" is rtl/, the 21-bit palette format this floorplan study
+# was built on; "D" is rtl2/, the implementation of the frozen row format and
+# of docs/SPEC.md. C remains selectable because every physical result on record
+# was measured with it, and a comparison is only a comparison if the old point
+# can still be reproduced.
+TREE    = sys.argv[8].upper() if len(sys.argv) > 8 else "C"
+assert TREE in ("C", "D"), TREE
 assert LAYOUT in ("interleaved", "grouped"), LAYOUT
 
 # ---------------------------------------------------------------- the top
@@ -128,26 +135,39 @@ for x in COLS:
     assert abs((x - X0) / VPITCH - round((x - X0) / VPITCH)) < 1e-6, f"x {x} off grid"
 assert COLS[-1] + MACRO_W <= CORE_X0 + CORE_W, "columns overflow the core"
 
+# rtl2 puts two more levels of hierarchy above the machine: the TT wrapper and
+# the array. The macro geometry is identical either way -- 2 CFGMEM_IHP16 per
+# machine, same footprint, same grid -- only the instance path changes.
+PREFIX = "u_chip.u_array." if TREE == "D" else ""
+INST   = "u_sm" if TREE == "D" else "u_core"
+
 instances = {}
 for sm in range(NSM):
     col = COLS[sm // 2]
     lo = (sm % 2) * 2           # machine 0 gets y[0],y[1]; machine 1 gets y[2],y[3]
     for t in range(2):
-        instances[f"g_sm[{sm}].u_core.u_imem.g_tile[{t}].u_tile"] = {
+        instances[f"{PREFIX}g_sm[{sm}].{INST}.u_imem.g_tile[{t}].u_tile"] = {
             "location": [round(col, 2), YS[lo + t]],
             "orientation": "N",
         }
 
+SRC_C = ["../rtl/stt_decode.v", "../rtl/stt_palette.v", "../rtl/stt_datapath.v",
+         "../rtl/stt_imem_cfgmem.v", "../rtl/stt_core_cfgmem.v",
+         "../rtl/stt_fifo.v", "../rtl/stt_hostbuf.v", "../rtl/stt_iomux.v",
+         "../rtl/crc_lfsr16.v", "../rtl/bit_stuffer.v",
+         "stt_chip_cfgmem.v"]
+SRC_D = ["../rtl2/cfgmem_ihp16_bb.v", "../rtl2/stt_config.v",
+         "../rtl2/stt_imem_cfgmem.v", "../rtl2/stt_core.v",
+         "../rtl2/stt_top_cfgmem.v", "../rtl2/stt_array.v",
+         "../rtl2/stt_fifo.v", "../rtl2/stt_hostbuf.v",
+         "../rtl2/stt_hostport.v", "../rtl2/stt_iomux.v",
+         "../rtl2/stt_chip.v", "../rtl2/tt_um_stt.v"]
+
 cfg = {
-    "DESIGN_NAME": "stt_chip_cfgmem",
-    "VERILOG_FILES": ["dir::" + f for f in [
-        "../rtl/stt_decode.v", "../rtl/stt_palette.v", "../rtl/stt_datapath.v",
-        "../rtl/stt_imem_cfgmem.v", "../rtl/stt_core_cfgmem.v",
-        "../rtl/stt_fifo.v", "../rtl/stt_hostbuf.v", "../rtl/stt_iomux.v",
-        "../rtl/crc_lfsr16.v", "../rtl/bit_stuffer.v",
-        "stt_chip_cfgmem.v",
-    ]],
-    "VERILOG_INCLUDE_DIRS": ["dir::../rtl"],
+    "DESIGN_NAME": "tt_um_stt" if TREE == "D" else "stt_chip_cfgmem",
+    "VERILOG_FILES": ["dir::" + f for f in (SRC_D if TREE == "D" else SRC_C)],
+    "VERILOG_INCLUDE_DIRS": ["dir::../rtl2" if TREE == "D" else "dir::../rtl"],
+    "VERILOG_DEFINES": ["IMEM_MACRO"] if TREE == "D" else [],
     "CLOCK_PORT": "clk",
     "CLOCK_PERIOD": 20,                      # 50 MHz
     "FP_SIZING": "absolute",
@@ -204,7 +224,7 @@ cfg = {
     "ERROR_ON_DISCONNECTED_PINS": 0,
 }
 
-lines = gen_top(NSM)
+lines = gen_top(NSM) if TREE == "C" else 0
 json.dump(cfg, open("config.json", "w"), indent=2)
 
 macro_area = len(instances) * MACRO_W * MACRO_H
@@ -212,7 +232,8 @@ core_area = CORE_W * CORE_H
 print(f"NSM={NSM}  macros={len(instances)}  layout={LAYOUT}  density={DENSITY}%  "
       f"halo={HHALO}/{VHALO}")
 print(f"  allow_congestion={ALLOW}  signoff_drc={SIGNOFF}")
-print(f"  top regenerated from ../rtl/stt_chip.v ({lines} lines)")
+print(f"  tree: {TREE} -- " + ("rtl2/, the frozen format, top tt_um_stt"
+      if TREE == "D" else f"rtl/, top regenerated from stt_chip.v ({lines} lines)"))
 print(f"  core: {CORE_W} x {CORE_H} = {core_area:.0f} um2 "
       f"(margins {BOT_MULT}/{TOP_MULT}/{LR_MULT}/{LR_MULT})")
 print(f"  columns x: {[round(c, 2) for c in COLS]}  pitch {COL_PITCH}, "
