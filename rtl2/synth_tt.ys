@@ -1,0 +1,32 @@
+# rtl2 synthesis + latch gate.
+#
+# Two jobs. First, prove there are no inferred latches: an accidental latch in a
+# combinational always block is the classic way a design that simulates
+# correctly fails in silicon, and the section 8.1 datapath is almost entirely
+# combinational. `select -assert-none` on the latch cell types fails the run.
+#
+# Second, report cell and flop counts against sg13cmos5l so a structural change
+# shows up early. This pass does not optimize for area.
+read_verilog -I. -sv stt_config.v stt_imem.v stt_core.v stt_top.v stt_array.v stt_fifo.v stt_hostbuf.v stt_hostport.v stt_iomux.v stt_chip.v tt_um_stt.v
+hierarchy -top tt_um_stt -check
+proc
+opt_clean
+
+# --- the latch gate, before any mapping can hide it ---
+select -assert-none t:$dlatch
+select -assert-none t:$_DLATCH_*
+select -assert-none t:$_DLATCHSR_*
+select -assert-none t:$sr
+select -assert-none t:$_SR_*
+log "GATE: no inferred latches in rtl2 (whole chip)"
+
+flatten -noscopeinfo
+opt -full
+memory
+opt -full
+techmap
+opt -full
+dfflibmap -liberty @LIB@
+abc -liberty @LIB@
+opt_clean
+stat -liberty @LIB@

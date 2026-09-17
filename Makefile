@@ -186,6 +186,7 @@ spec:
 check: spec-check
 	@$(MAKE) --no-print-directory rtl2-isa-check
 	@$(MAKE) --no-print-directory rtl2-latch
+	@$(MAKE) --no-print-directory rtl2-latch-tt
 	@$(MAKE) --no-print-directory check-freeze
 	@$(MAKE) --no-print-directory check-can
 	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
@@ -226,7 +227,7 @@ check-can:
 # ---------------------------------------------------------------- rtl2
 # The implementation of the frozen ISA. rtl/ is the previous format's
 # measurement harness and is left alone so the area study stays reproducible.
-.PHONY: rtl2-isa-check rtl2-latch rtl2-test rtl2
+.PHONY: rtl2-isa-check rtl2-latch rtl2-latch-tt rtl2-test rtl2
 
 # The decode constants are generated from spec/isa.json for the same reason the
 # encoding tables in docs/SPEC.md are: a hand-copied constant is a silent
@@ -247,6 +248,18 @@ rtl2-latch: lib-check
 	  { echo "rtl2: latch gate did not run"; exit 1; }
 	@echo "OK: rtl2 has no inferred latches"
 	@grep -E "Chip area for module" rtl2/synth.log | tail -1
+
+# The same gate over the WHOLE chip, up to tt_um_stt. stt_top alone leaves the
+# iomux, the host port and the chip glue unguarded, and the iomux's pin decode
+# is exactly the shape that infers a latch if a branch is ever missed.
+rtl2-latch-tt: lib-check
+	@LIB=$(LIB) bash rtl2/run_synth_tt.sh > rtl2/synth_tt.log 2>&1 || \
+	  { echo "rtl2 WHOLE-CHIP LATCH GATE FAILED; see rtl2/synth_tt.log"; \
+	    grep -E "Latch inferred|Assertion failed|ERROR" rtl2/synth_tt.log | head -5; exit 1; }
+	@grep -q "no inferred latches" rtl2/synth_tt.log || \
+	  { echo "rtl2: whole-chip latch gate did not run"; exit 1; }
+	@echo "OK: rtl2 has no inferred latches up to tt_um_stt"
+	@grep -E "Chip area for module ..tt_um_stt" rtl2/synth_tt.log | tail -1
 
 # Cycle-exact lockstep against the authoritative models. Needs cocotb and a
 # simulator, so it is a separate target: see rtl2/README.md for the environment.

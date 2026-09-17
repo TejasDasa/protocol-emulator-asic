@@ -36,6 +36,13 @@ module stt_iomux #(
     output wire                   sel_ld_out,
     output wire                   run,
 
+    // SPEC section 11.2 host byte port. Pin-selected, not reserved: with
+    // host_en low nothing here consumes a pin and all 16 stay available.
+    output wire                   host_en,
+    output wire                   host_stb,
+    output wire                   host_din,
+    input  wire                   host_dout,
+
     // machine side
     input  wire [NSM*NSLOT-1:0]   sm_out,
     input  wire [NSM*NSLOT-1:0]   sm_oe,
@@ -54,7 +61,15 @@ module stt_iomux #(
   localparam integer ISELW = (NPIN > 1) ? $clog2(NPIN) : 1;
   localparam integer OBITS = NOUT * OSELW;
   localparam integer IBITS = NSM * NIN * ISELW;
-  localparam integer NBITS = 1 + OBITS + IBITS;
+  // Host port fields are APPENDED, so every existing select keeps its bit
+  // position in the chain (SPEC section 11.2).
+  localparam integer HBITS = 1 + 2 * ISELW;
+  localparam integer NBITS = 1 + OBITS + IBITS + HBITS;
+  // Output select code 15 is free: there are NSM*NSLOT = 15 drivers numbered
+  // 0..14 in a 4-bit field, so the top code matches nothing today. A pin whose
+  // select is HOST_CODE carries host_dout instead of a driver.
+  localparam [OSELW-1:0] HOST_CODE = {OSELW{1'b1}};
+  localparam integer HOST_CODE_FREE = (DRV <= HOST_CODE) ? 1 : 0;
 
   // One chain: `run` at bit 0, then the output selects, then the input selects.
   //
@@ -77,9 +92,16 @@ module stt_iomux #(
   localparam integer O_RUN = 0;
   localparam integer O_OSEL = 1;
   localparam integer O_ISEL = O_OSEL + OBITS;
+  localparam integer O_HEN  = O_ISEL + IBITS;
+  localparam integer O_HSTB = O_HEN  + 1;
+  localparam integer O_HDIN = O_HSTB + ISELW;
 
   // ---- inputs: every pin is readable, and ui_in/uio_in are the sources ----
   wire [NPIN-1:0] pin_val = {uio_in, ui_in};
+
+  assign host_en  = cfg[O_HEN] & (HOST_CODE_FREE != 0);
+  assign host_stb = host_en & pin_val[cfg[O_HSTB +: ISELW]];
+  assign host_din = pin_val[cfg[O_HDIN +: ISELW]];
 
   genvar m, i, p;
   generate
@@ -109,6 +131,11 @@ module stt_iomux #(
             d = sm_out[k];
             e = sm_oe[k];
           end
+        // SPEC section 11.2: the free top code carries the host port out.
+        if ((HOST_CODE_FREE != 0) && host_en && (s == HOST_CODE)) begin
+          d = host_dout;
+          e = 1'b1;
+        end
       end
       assign pin_d[p] = d;
       assign pin_e[p] = e;

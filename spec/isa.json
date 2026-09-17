@@ -25,6 +25,29 @@
     ]
   },
 
+  "_host_port_note": "Section 11.2. The host byte interface is SERIALIZED, for the same reason everything else on this boundary is: there are 8 ui_in bits and section 11.1 already spends seven of them while run = 0. An 8-bit parallel data path does not fit. It is also OPTIONAL and pin-selected rather than reserved, which is what keeps section 11.1's pin budget intact: a design that does not need host bytes still maps all 15 drivers onto 16 pins.",
+
+  "host_port": {
+    "frame_bits": 16,
+    "config_bits": 9,
+    "pins": [
+      {"name": "host_stb",  "dir": "in",  "assigned_by": "host_stb_sel, 4 bits, any input-capable pin"},
+      {"name": "host_din",  "dir": "in",  "assigned_by": "host_din_sel, 4 bits, any input-capable pin"},
+      {"name": "host_dout", "dir": "out", "assigned_by": "output select code 15 on any output-capable pin"}
+    ],
+    "frame_in": [
+      {"bits": "15:13", "field": "sel",  "meaning": "state machine index"},
+      {"bits": "12",    "field": "wr",   "meaning": "1 = push `data` onto the selected machine's TX FIFO"},
+      {"bits": "11:4",  "field": "data", "meaning": "the byte to push, MSB first"},
+      {"bits": "3:0",   "field": "pad",  "meaning": "ignored on input"}
+    ],
+    "frame_out": [
+      {"bits": "15:12", "field": "zero",   "meaning": "driven 0: `sel` has not arrived yet"},
+      {"bits": "11:4",  "field": "rxdata", "meaning": "the selected machine's oldest RX byte, MSB first, 0 when empty"},
+      {"bits": "3:0",   "field": "status", "meaning": "rx_ne, tx_full, rx_ovf, tx_unf of the selected machine"}
+    ]
+  },
+
   "_load_protocol_note": "Section 10. These are consequences of CFGMEM_IHP16 being a shift chain rather than a random-access array, not design choices. Confirmed three ways: the DFFRAM netlist has SLICE[i].STORAGE with .D(Di0_in[i]) and .Q(Di0_in[i+1]); prism's reference model is 'row 0 takes Di0, row i takes row i-1'; and prism's loader FSM comment says a write takes DEPTH*3 clocks to walk the WROW pulses.",
 
   "fifo": {

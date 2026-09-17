@@ -909,7 +909,9 @@ At **5 state machines**:
 | input select field              | 4 bits       | ceil(log2(16))        |
 | input select chain              | 40 bits      | 10 inputs x 4 bits    |
 | `run` flag                      | 1 bit        | §11.1                 |
-| **pin-assignment config total** | **105 bits** |                       |
+| host port enable                | 1 bit        | §11.2                 |
+| host port pin selects           | 8 bits       | 2 pins x 4 bits       |
+| **pin-assignment config total** | **114 bits** |                       |
 
 <!-- END GENERATED: pin-map -->
 
@@ -1008,6 +1010,109 @@ wrapping into `uio_in` past 8, which at five machines gives machine 4
 `run` flag at all. See §16.
 
 ---
+
+### 11.2 The host byte port
+
+**SPECIFIED.** §9 gives every machine a TX and an RX FIFO and §10 gives the host
+a way to load programs, but until this section the byte itself had no path to a
+pin in either direction. This settles it.
+
+**It is serialized, because the boundary leaves no choice.** There are 8 `ui_in`
+bits and §11.1 already spends seven of them while `run` = 0. An 8-bit parallel
+data path does not fit, and no rearrangement makes it fit. So a byte is shifted
+one bit per clock, the same way the imem, the configuration and the pin
+assignment are already loaded. A transaction costs 16 clocks instead of 1, which
+for a host polling a 4-deep FIFO is irrelevant: §9's binding case is a byte every
+30 cycles.
+
+**It is optional and pin-selected, not reserved.** This is the part that matters
+for the budget. Reserving three pins permanently would leave 13 output-capable
+pins for 15 drivers — precisely the failure §11.1 introduced `run` to avoid. So
+the host port is named by selects like everything else:
+
+<!-- BEGIN GENERATED: host-port -->
+<!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
+
+| pin         | direction | assigned by                                     |
+|-------------|-----------|-------------------------------------------------|
+| `host_stb`  | in        | host_stb_sel, 4 bits, any input-capable pin     |
+| `host_din`  | in        | host_din_sel, 4 bits, any input-capable pin     |
+| `host_dout` | out       | output select code 15 on any output-capable pin |
+
+One transaction is **16 clocks** of `host_stb`, MSB first.
+
+| bits    | field in | meaning                                             |
+|---------|----------|-----------------------------------------------------|
+| `15:13` | `sel`    | state machine index                                 |
+| `12`    | `wr`     | 1 = push `data` onto the selected machine's TX FIFO |
+| `11:4`  | `data`   | the byte to push, MSB first                         |
+| `3:0`   | `pad`    | ignored on input                                    |
+
+| bits    | field out | meaning                                                        |
+|---------|-----------|----------------------------------------------------------------|
+| `15:12` | `zero`    | driven 0: `sel` has not arrived yet                            |
+| `11:4`  | `rxdata`  | the selected machine's oldest RX byte, MSB first, 0 when empty |
+| `3:0`   | `status`  | rx_ne, tx_full, rx_ovf, tx_unf of the selected machine         |
+
+<!-- END GENERATED: host-port -->
+
+`host_dout` uses **output select code 15**, which exists and means nothing
+today: there are 15 drivers, numbered 0–14, and a 4-bit field. A pin whose
+select is 15 currently matches no driver and reads 0. Assigning it to the host
+costs no new field anywhere.
+
+**The pin arithmetic works out exactly.** Put `host_stb` and `host_din` on
+`ui_in` pins, which are input-only and are not drivers, and the only
+output-capable pin the host consumes is the one carrying `host_dout`:
+
+| | without host port | with host port on `ui_in` |
+|---|---|---|
+| output-capable pins | 16 | 15 |
+| drivers to place | 15 | 15 |
+| input-capable pins | 16 | 14 |
+| machine inputs to source | 10 | 10 |
+
+Fifteen drivers still have fifteen pins. A design that sets `host_en` = 0 pays
+nothing at all and keeps all 16. The host port may equally live on `uio` pins,
+since after `run` nothing is reserved and all 8 are bidirectional and
+input-capable; that costs an output-capable pin per `uio` pin used for input,
+which is why `ui_in` is the recommended placement.
+
+**Framing.** `host_stb` gates the shift: on each rising clock edge where the
+selected strobe pin reads 1, one bit enters on `host_din` and one bit leaves on
+`host_dout`. Sixteen such clocks are one transaction. The chip counts them
+itself, so the host does not send a frame delimiter; lowering `host_stb`
+mid-frame abandons the transaction and the counter resets.
+
+Both directions carry useful traffic in the same 16 clocks. `sel` arrives first
+so that by the time the data field is going out, the chip knows which machine's
+RX FIFO to read; `status` goes out last, when everything it reports is known.
+The four leading output bits are driven 0 because `sel` has not arrived yet, and
+carry no information.
+
+**Effects land at the end of the frame, not during it.** On the sixteenth clock:
+if `wr` = 1 and the selected TX FIFO is not full, `data` is pushed; if the
+selected RX FIFO was not empty, the byte just shifted out is popped. An
+abandoned frame has no effect. 
+
+**A write onto a full TX FIFO is dropped, and the host finds out in the same
+frame.** §9 drops the incoming byte rather than the oldest queued one, and the
+TX FIFO's overflow flag is not among the four status bits. What the host gets
+instead is `tx_full` in that frame's own `status`, captured **before** the write
+lands: if it reads 1, the write just sent was dropped. That is enough for flow
+control and costs no extra pin, but it is a report after the fact, not a
+handshake — a host that wants never to lose a byte leaves one frame of slack,
+writing only when the previous frame reported `tx_full` = 0.
+
+**Reading an empty RX FIFO returns zero and does not pop.** The host
+distinguishes that from a genuine 0x00 byte by the `rx_ne` bit in `status`,
+which reports the state **before** the frame's pop. This is the same choice §9
+makes for `load` on an empty FIFO: report it, do not invent data.
+
+**IMPLEMENTED in `rtl2/stt_hostport.v`,** with the pin selects in
+`rtl2/stt_iomux.v`, and verified through the real boundary by
+`rtl2/tb/test_hostport.py`.
+
 
 ## 12. Memory organization
 
@@ -1173,13 +1278,12 @@ and where the evidence stops.
 
 | item | status |
 |---|---|
-| **Static timing analysis** | RUN, for configuration C at five machines: post-route setup is −1.266 ns at the slow corner, about 47 MHz, hold met at every corner (§14). NOT run for format D, whose critical paths differ. |
+| **Every physical result describes configuration C** | Placement, routing, LVS and static timing were all run on `floorplan/stt_chip_cfgmem.v`, which `floorplan/gen_config.py` generates from `rtl/stt_chip.v` -- the 21-bit palette format, not the frozen format D that `rtl2/` implements. What those runs establish is a property of the physical problem and carries over: ten macros of this size place on the grid, a design of roughly this cell count routes at five machines and not at six, and the timing regime is post-route setup −1.266 ns at the slow corner (about 47 MHz) with hold met at every corner (§14). What does NOT carry over is D's own critical paths and D's own congestion. D's per-machine logic is smaller than C's (`docs/row-format-decision.md` §2), so the substitution is conservative in the direction that matters, but it is a substitution. **No `rtl2` design has ever been hardened.** |
+| **Signoff DRC and LVS** | Not clean. The five-machine C design fails LVS with `VPWR`/`VGND` fragmented into disconnected pieces (`design__lvs_error__count` 2, all signal counts zero), and the flow stopped at IR-drop analysis on a plugin connectivity gap (`floorplan/README.md`). Not submittable as it stands. |
 | **Device-model edge alignment** | Every device model in `isa_bench/` drives its waveform from a fixed start time on an integer-cycle grid, so a machine's timer and the traffic it observes are in a **deterministic phase relationship by construction**. Nothing produces arbitrary edge phase or jitter. This affects every timing result in the repository, including the SPI and I²C minimum-phase assertions of §8: those check a phase is long enough, on waveforms aligned to the machine by construction. Found concretely — a mutation removing the `thalf` mid-bit alignment from the UART detector survives *every* case, because without it the free-running timer lands usably by luck rather than by design (`isa_bench/DETECTOR_NOTES.md`). Arbitrary phase and jitter in the device models is needed for RTL verification regardless, and this mutant is the concrete proof it is missing. |
 | **Inter-pin skew** | The model has no pin path. Skew between a clock and its data — SCK/MOSI, SCL/SDA — is the failure mode that matters in silicon and is entirely unmeasured. |
-| **Multi-state-machine floorplan** | RUN. Five machines and ten macros place and route with zero router DRC errors, and all ten macros are geometrically verified as powered from the routed DEF. Six machines could not be made to route at any placement density or macro grouping. Signoff DRC and LVS are still owed: the flow stopped at IR-drop analysis on a plugin connectivity gap (`floorplan/README.md`). |
-| **The input select path and the `run` flag** | §11.1 specifies per-machine input selects and a `run` flag that releases the control pins during operation. `rtl/stt_iomux.v` implements neither: inputs are a fixed tap that collides with the control pins, and `rtl/stt_chip.v` decodes control unconditionally. Specified, unimplemented. |
-| **`rtl/stt_imem_cfgmem.v` cannot work** | It drives a one-hot `WROW` as though CFGMEM_IHP16 were a random-access array. It is a shift chain, so that copies the previous row into the selected one instead of writing it (§10). Synthesised for area, never simulated. `rtl2/` has the working version. |
-| **The structural RTL** | `rtl/` was written to measure area. It implements the *previous* row format (21-bit, 5-bit target, palette) and has never passed a functional test. It is not an implementation of this specification. |
+| **Multi-state-machine floorplan** | RUN. Five machines and ten macros place and route with zero router DRC errors, and all ten macros are geometrically verified as powered from the routed DEF. Six machines could not be made to route at any placement density or macro grouping. Signoff is a separate row above. |
+| **The structural RTL** | `rtl/` was written to measure area. It implements the *previous* row format (21-bit, 5-bit target, palette) and has never passed a functional test. **It is not an implementation of this specification and is not a gap in one.** Everything it lacks -- no `run` flag, an input tap that collides with the control pins, and an `stt_imem_cfgmem.v` that drives a one-hot `WROW` as though CFGMEM_IHP16 were a random-access array rather than a shift chain -- is a property of that tree, not of this document. `rtl2/` implements all of it. `rtl/stt_core` also carries `fixed_entry_i[*]`, an external-palette input that is dead with the palette gone and would appear as 13 disconnected pins in a hardened design; `rtl2/stt_core` does not have it. |
 
 ### 16.3 Reachable but unexercised
 
@@ -1187,7 +1291,6 @@ and where the evidence stops.
 |---|---|
 | **The 32-row ceiling** | JTAG sits at 25 of 32 and CAN at 24 of 32. The next row costs a third and fourth tile, not one row (§12). No protocol in the conformance set exceeds 32, but the ceiling does bind: the software-stuffing CAN variant in `isa_bench/can_soft.py` needs 54 rows and is unimplementable because of it. |
 | **I²C START/STOP timing** | Six timer mutants survive. They change pin timing but never below the bit-period minimum, because those rows govern setup and hold intervals that I²C specifies separately (`t_SU;STA`, `t_HD;STA`, `t_SU;STO`) and the benchmark does not check. |
-| **`fixed_entry_i[*]`** | `stt_core` carries an external-palette input used only when `EXT_FIXED=1`. With the palette gone it is dead, and it appears as 13 disconnected pins in a hardened design. A real multi-machine top must not expose it. |
 
 ### 16.4 How this document can go wrong
 

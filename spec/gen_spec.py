@@ -148,8 +148,22 @@ def blocks(spec):
          ["input select field", f"{inw} bits", f"ceil(log2({pm['in_capable_pins']}))"],
          ["input select chain", f"{inputs * inw} bits", f"{inputs} inputs x {inw} bits"],
          ["`run` flag", "1 bit", "§11.1"],
+         ["host port enable", "1 bit", "§11.2"],
+         ["host port pin selects", f"{2 * inw} bits", f"2 pins x {inw} bits"],
          ["**pin-assignment config total**",
-          f"**{pm['out_capable_pins'] * selw + inputs * inw + 1} bits**", ""]]
+          f"**{pm['out_capable_pins'] * selw + inputs * inw + 1 + 1 + 2 * inw} bits**", ""]]
+    )
+
+    hp = spec["host_port"]
+    b["host-port"] = table(
+        ["pin", "direction", "assigned by"],
+        [[f"`{p['name']}`", p["dir"], p["assigned_by"]] for p in hp["pins"]]
+    ) + f"\n\nOne transaction is **{hp['frame_bits']} clocks** of `host_stb`, MSB first.\n\n" + table(
+        ["bits", "field in", "meaning"],
+        [[f"`{r['bits']}`", f"`{r['field']}`", r["meaning"]] for r in hp["frame_in"]]
+    ) + "\n\n" + table(
+        ["bits", "field out", "meaning"],
+        [[f"`{r['bits']}`", f"`{r['field']}`", r["meaning"]] for r in hp["frame_out"]]
     )
 
     b["pin-config-mode"] = table(

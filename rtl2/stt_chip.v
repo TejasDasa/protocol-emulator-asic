@@ -46,17 +46,9 @@ module stt_chip #(
     output wire [7:0]         uio_out,
     output wire [7:0]         uio_oe,
 
-    // Host byte port. Still brought out as ports rather than reaching actual
-    // pins: giving the host pins needs the iomux to reserve some, which output
-    // select code 15 is free to express (there are 15 drivers, 0..14). That is
-    // the next step.
-    input  wire [2:0]          host_sel,
-    input  wire                host_tx_we,
-    input  wire [SR_W-1:0]     host_tx_data,
-    output wire                host_tx_full,
-    input  wire                host_rx_re,
-    output wire [SR_W-1:0]     host_rx_data,
-    output wire                host_rx_ne,
+    // The host byte port reaches real pins through the iomux (SPEC section
+    // 11.2). Nothing of it is a module port any more; what is left here is
+    // observability only.
     output wire [NSM-1:0]      dbg_rx_ovf,
     output wire [NSM-1:0]      dbg_tx_unf,
 
@@ -115,6 +107,22 @@ module stt_chip #(
   wire [NSM*SR_W-1:0] tx_data, rx_data;
   wire [NSM-1:0]      tx_ne, tx_pop, rx_push;
 
+  wire [2:0]      host_sel;
+  wire            host_tx_we, host_tx_full, host_rx_re, host_rx_ne;
+  wire [SR_W-1:0] host_tx_data, host_rx_data;
+  wire            host_en, host_stb, host_din, host_dout;
+
+  stt_hostport #(.SR_W(SR_W), .NSM(NSM)) u_hostport (
+      .clk(clk), .rst_n(rst_n),
+      .host_en(host_en), .stb(host_stb), .din(host_din), .dout(host_dout),
+      .host_sel(host_sel),
+      .host_tx_we(host_tx_we), .host_tx_data(host_tx_data),
+      .host_tx_full(host_tx_full),
+      .host_rx_re(host_rx_re), .host_rx_data(host_rx_data),
+      .host_rx_ne(host_rx_ne),
+      .rx_ovf(dbg_rx_ovf), .tx_unf(dbg_tx_unf)
+  );
+
   stt_hostbuf #(.NSM(NSM), .SR_W(SR_W), .DEPTH(FIFO_DEPTH)) u_hostbuf (
       .clk(clk), .rst_n(rst_n),
       .tx_data(tx_data), .tx_ne(tx_ne), .tx_pop(tx_pop),
@@ -152,6 +160,8 @@ module stt_chip #(
   u_iomux (
       .clk(clk), .rst_n(rst_n),
       .sel_ld_en(sel_ld_en), .sel_ld_in(ld_in), .sel_ld_out(), .run(run),
+      .host_en(host_en), .host_stb(host_stb), .host_din(host_din),
+      .host_dout(host_dout),
       .sm_out(sm_out), .sm_oe(sm_oe), .sm_in(sm_in),
       .ui_in(ui_in), .uo_out(mux_uo),
       .uio_in(uio_in), .uio_out(mux_uio_out), .uio_oe(mux_uio_oe)

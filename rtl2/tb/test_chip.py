@@ -35,6 +35,15 @@ OSELW = 4          # ceil(log2(NSM * NSLOT)) = ceil(log2(15))
 ISELW = 4          # ceil(log2(16))
 OBITS = NOUT * OSELW
 IBITS = NSM * NIN * ISELW
+O_HEN = 1 + OBITS + IBITS      # host_en, then host_stb_sel, host_din_sel
+# SPEC section 11.2. The strobe and data pins are uio, so they never collide
+# with the ui_in pins the machines read; the output pin takes the free select
+# code 15, which no driver uses.
+HOST_STB_PIN  = 15             # uio_in[7]
+HOST_DIN_PIN  = 14             # uio_in[6]
+HOST_DOUT_PIN = 13             # uio_out[5]
+HOST_CODE = 15
+FRAME = 16
 FIELDS = ("row", "link", "sr", "cnt", "c2", "crc", "tcount", "pinv")
 WIDTHS = dict(row=ADDR_W, link=ADDR_W, sr=SR_W, cnt=CNT_W, c2=CNT_W,
               crc=5, tcount=TIMER_W, pinv=NSLOT)
@@ -138,15 +147,19 @@ async def chip_lockstep(dut):
         sel |= drv << (1 + pin * OSELW)
     for (k, i), pin in in_pin.items():
         sel |= pin << (1 + OBITS + (k * NIN + i) * ISELW)
+    assert nxt_od <= HOST_DOUT_PIN, (
+        f"open-drain slots reached pin {nxt_od - 1}, colliding with the host "
+        f"port's output pin {HOST_DOUT_PIN}")
+    sel |= HOST_CODE << (1 + HOST_DOUT_PIN * OSELW)
+    sel |= 1 << O_HEN
+    sel |= HOST_STB_PIN << (O_HEN + 1)
+    sel |= HOST_DIN_PIN << (O_HEN + 1 + ISELW)
+    NSEL = O_HEN + 1 + 2 * ISELW
 
     cocotb.start_soon(Clock(dut.clk, PERIOD_NS, unit="ns").start())
     dut.ena.value = 1
     dut.ui_in.value = 0
     dut.uio_in.value = 0
-    dut.host_sel.value = 0
-    dut.host_tx_we.value = 0
-    dut.host_tx_data.value = 0
-    dut.host_rx_re.value = 0
     dut.rst_n.value = 0
     for _ in range(3):
         await RisingEdge(dut.clk)
@@ -168,7 +181,7 @@ async def chip_lockstep(dut):
         assert i_(dut.dbg_run, "dbg_run") == 0, (
             f"run went high during machine {k}'s load")
 
-    await shift_ctl(dut, 2, sel, 1 + OBITS + IBITS, "pinsel")
+    await shift_ctl(dut, 2, sel, NSEL, "pinsel")
     assert i_(dut.dbg_run, "dbg_run") == 1, (
         "run should be set by the last bit of the pin-assignment chain")
 
@@ -197,8 +210,10 @@ async def chip_lockstep(dut):
     # payload is taken out of the model queue and fed to BOTH sides together, as
     # space allows, which is what a real host does. Model and RTL then hold
     # identical queues and the lockstep stays exact.
+    hp = dict(k=0, sel=len(machines) - 1, wr=False, byte=0, word=0, rx=0, st=0)
     for m in machines:
         m["pending"] = []
+        m["tx_full_seen"] = False
         m["model_q"] = 0          # bytes we have fed and the model has not popped
         m["drained"] = 0
 
@@ -231,29 +246,45 @@ async def chip_lockstep(dut):
             m["tx_before"] = len(m["w"].tx_fifo)
             m["rx_before"] = len(m["w"].rx_fifo)
 
-        # The host services one machine per cycle, round robin: it tops up that
-        # machine's TX FIFO if it has room, and drains a byte from its RX FIFO if
-        # one is waiting. Five machines means each is serviced every 5 cycles,
-        # against a byte every 30 at the fastest receiver, so depth 4 is never
-        # under pressure here -- which is the point of the number.
-        sel = t % len(machines)
-        ms = machines[sel]
-        dut.host_sel.value = sel
+        # The host talks over the SPEC section 11.2 serial port, so servicing a
+        # machine costs 16 clocks instead of 1. Five machines round robin means
+        # each is serviced every 80 cycles, against a byte every 30 at the
+        # fastest receiver and a 4-deep FIFO holding 120 cycles' worth -- which
+        # is why depth 4 still holds once the port is serialized.
+        if hp["k"] == 0:
+            hp["sel"] = (hp["sel"] + 1) % len(machines)
+            ms = machines[hp["sel"]]
+            hp["wr"] = bool(ms["pending"]) and not ms["tx_full_seen"]
+            hp["byte"] = ms["pending"][0] if hp["wr"] else 0
+            hp["word"] = ((hp["sel"] & 7) << 13) | (int(hp["wr"]) << 12) \
+                | ((hp["byte"] & 0xFF) << 4)
+            hp["rx"] = 0
+            hp["st"] = 0
+        ms = machines[hp["sel"]]
+        k = hp["k"]
+        dut.uio_in.value = (1 << (HOST_STB_PIN - 8)) \
+            | ((((hp["word"] >> (15 - k)) & 1)) << (HOST_DIN_PIN - 8))
         await settle(dut)
-        will_write = bool(ms["pending"]) and not i_(dut.host_tx_full, "host_tx_full")
-        dut.host_tx_we.value = 1 if will_write else 0
-        dut.host_tx_data.value = ms["pending"][0] if will_write else 0
-        rx_ready = i_(dut.host_rx_ne, "host_rx_ne")
-        dut.host_rx_re.value = rx_ready
-        await settle(dut)
-        if rx_ready:
-            got = i_(dut.host_rx_data, "host_rx_data")
-            want = ms["w"].rx_fifo[ms["drained"]] & 0xFF
-            if got != want:
-                raise Divergence(
-                    f"machine {sel} ({ms['name']}): cycle {t}: host read byte "
-                    f"{ms['drained']} as 0x{got:02x}, model pushed 0x{want:02x}")
-            ms["drained"] += 1
+        # Frame out bit 15-k: zeros, then the RX byte, then the status nibble.
+        ob = (i_(dut.uio_out, "uio_out") >> (HOST_DOUT_PIN - 8)) & 1
+        if 4 <= k <= 11:
+            hp["rx"] = (hp["rx"] << 1) | ob
+        elif k >= 12:
+            hp["st"] = (hp["st"] << 1) | ob
+        will_write = False
+        if k == FRAME - 1:
+            rx_ne   = (hp["st"] >> 3) & 1
+            tx_full = (hp["st"] >> 2) & 1
+            ms["tx_full_seen"] = bool(tx_full)
+            will_write = hp["wr"] and not tx_full
+            if rx_ne:
+                want = ms["w"].rx_fifo[ms["drained"]] & 0xFF
+                if hp["rx"] != want:
+                    raise Divergence(
+                        f"machine {hp['sel']} ({ms['name']}): cycle {t}: host "
+                        f"read byte {ms['drained']} as 0x{hp['rx']:02x} over the "
+                        f"serial port, model pushed 0x{want:02x}")
+                ms["drained"] += 1
         pops = i_(dut.tx_pop, "tx_pop")
         pushes = i_(dut.rx_push, "rx_push")
 
@@ -275,6 +306,7 @@ async def chip_lockstep(dut):
         if will_write:
             ms["w"].tx_fifo.append(ms["pending"].pop(0))
             ms["model_q"] += 1
+        hp["k"] = (hp["k"] + 1) % FRAME
 
         # ui_in is driven from the POST-step net values, matching what
         # World.read_sync records. Driving it before the step samples the net
@@ -346,3 +378,6 @@ async def chip_lockstep(dut):
         f"no divergence and every assigned pin correct")
     dut._log.info(f"  output pins used: {sorted(out_map)}  "
                   f"input pins used: {sorted(in_pin.values())}")
+    dut._log.info("  over the section 11.2 serial port: "
+                  + ", ".join(f"{m['name']} read {m['drained']}"
+                              for m in machines))

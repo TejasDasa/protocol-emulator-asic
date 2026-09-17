@@ -44,6 +44,7 @@ def sources_and_top():
     """
     multi = os.environ.get("MULTI", "0") == "1"
     chip  = os.environ.get("CHIP", "0") == "1"
+    ttop  = os.environ.get("TTOP", "0") == "1"
     if os.environ.get("IMEM", "behavioural") == "cfgmem":
         base = ("cfgmem_ihp16_model.v", "stt_config.v", "stt_imem_cfgmem.v",
                 "stt_core.v", "stt_top_cfgmem.v")
@@ -51,10 +52,14 @@ def sources_and_top():
     else:
         base = ("stt_config.v", "stt_imem.v", "stt_core.v", "stt_top.v")
         top = "stt_top"
-    if chip:
+    if chip or ttop:
         base = base + ("stt_array.v", "stt_iomux.v", "stt_fifo.v",
-                       "stt_hostbuf.v", "stt_chip.v")
+                       "stt_hostbuf.v", "stt_hostport.v", "stt_chip.v")
         top = "stt_chip"
+    if ttop:
+        # The real submission boundary: only ui_in/uo_out/uio reach the top.
+        base = base + ("tt_um_stt.v",)
+        top = "tt_um_stt"
     elif multi:
         base = base + ("stt_array.v",)
         top = "stt_array"
