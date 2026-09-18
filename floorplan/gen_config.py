@@ -71,6 +71,7 @@ assert TREE in ("C", "D"), TREE
 # pass that could buffer them. It can also move timing in either direction,
 # which is why it is a separate switch and a separate run.
 REPAIR  = int(sys.argv[9]) if len(sys.argv) > 9 else 0
+THREADS = int(sys.argv[10]) if len(sys.argv) > 10 else 4
 assert LAYOUT in ("interleaved", "grouped"), LAYOUT
 
 # ---------------------------------------------------------------- the top
@@ -244,6 +245,11 @@ cfg = {
     # SIGNOFF: 0 = IR drop only (the default sweep), 1 = signoff DRC/LVS with
     # IR drop OFF, which is how signoff was reached while PSM-0069 blocked it,
     # 2 = everything on, which is what a fixed PDN annotation should allow.
+    # Detailed routing is multi-threaded and unbounded by default, which on a
+    # 7.6 GB machine means 16 threads and an OOM kill partway through DRT. The
+    # runs that completed earlier were luckier, not different. Capping this
+    # trades wall clock for finishing.
+    "OPENROAD_THREADS": THREADS,
     "RUN_POST_GRT_DESIGN_REPAIR": bool(REPAIR),
     "RUN_POST_GRT_RESIZER_TIMING": bool(REPAIR),
     "RUN_IRDROP_REPORT": SIGNOFF != 1,
@@ -267,7 +273,7 @@ macro_area = len(instances) * MACRO_W * MACRO_H
 core_area = CORE_W * CORE_H
 print(f"NSM={NSM}  macros={len(instances)}  layout={LAYOUT}  density={DENSITY}%  "
       f"halo={HHALO}/{VHALO}")
-print(f"  allow_congestion={ALLOW}  signoff_drc={SIGNOFF}  post_grt_repair={REPAIR}")
+print(f"  allow_congestion={ALLOW}  signoff_drc={SIGNOFF}  post_grt_repair={REPAIR}  threads={THREADS}")
 print(f"  tree: {TREE} -- " + ("rtl2/, the frozen format, top tt_um_stt"
       if TREE == "D" else f"rtl/, top regenerated from stt_chip.v ({lines} lines)"))
 print(f"  core: {CORE_W} x {CORE_H} = {core_area:.0f} um2 "
