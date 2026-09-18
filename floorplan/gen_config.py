@@ -64,6 +64,13 @@ SIGNOFF = int(sys.argv[7]) if len(sys.argv) > 7 else 0
 # can still be reproduced.
 TREE    = sys.argv[8].upper() if len(sys.argv) > 8 else "C"
 assert TREE in ("C", "D"), TREE
+# Post-global-route design repair. Off by default, because every result on
+# record was measured without it. The slew and capacitance violations sit on
+# u_imem.do_tile -- the CFGMEM macro output driving the asynchronous read mux
+# (SPEC section 12), whose real load only exists after routing -- so this is the
+# pass that could buffer them. It can also move timing in either direction,
+# which is why it is a separate switch and a separate run.
+REPAIR  = int(sys.argv[9]) if len(sys.argv) > 9 else 0
 assert LAYOUT in ("interleaved", "grouped"), LAYOUT
 
 # ---------------------------------------------------------------- the top
@@ -213,6 +220,8 @@ cfg = {
     # SIGNOFF: 0 = IR drop only (the default sweep), 1 = signoff DRC/LVS with
     # IR drop OFF, which is how signoff was reached while PSM-0069 blocked it,
     # 2 = everything on, which is what a fixed PDN annotation should allow.
+    "RUN_POST_GRT_DESIGN_REPAIR": bool(REPAIR),
+    "RUN_POST_GRT_RESIZER_TIMING": bool(REPAIR),
     "RUN_IRDROP_REPORT": SIGNOFF != 1,
     "RUN_KLAYOUT_DRC": SIGNOFF >= 1,
     "RUN_MAGIC_DRC": SIGNOFF >= 1,
@@ -234,7 +243,7 @@ macro_area = len(instances) * MACRO_W * MACRO_H
 core_area = CORE_W * CORE_H
 print(f"NSM={NSM}  macros={len(instances)}  layout={LAYOUT}  density={DENSITY}%  "
       f"halo={HHALO}/{VHALO}")
-print(f"  allow_congestion={ALLOW}  signoff_drc={SIGNOFF}")
+print(f"  allow_congestion={ALLOW}  signoff_drc={SIGNOFF}  post_grt_repair={REPAIR}")
 print(f"  tree: {TREE} -- " + ("rtl2/, the frozen format, top tt_um_stt"
       if TREE == "D" else f"rtl/, top regenerated from stt_chip.v ({lines} lines)"))
 print(f"  core: {CORE_W} x {CORE_H} = {core_area:.0f} um2 "
