@@ -2,8 +2,8 @@
 
 `floorplan/odb_stripes.py` and `floorplan/librelane_plugin_prism_pdn.py` are a
 vendored copy of the PDN step from `kdp1965/ihp-um-janestreet-prism`, and are
-gitignored for that reason. Changes to them therefore live here as patches, so
-that a fix is reviewable and survives a re-vendor.
+gitignored for that reason. Changes to them live here as patches, so a change is
+reviewable and survives a re-vendor.
 
 Apply with:
 
@@ -11,42 +11,48 @@ Apply with:
 
 ## `odb_stripes-annotate-macro-power.patch`
 
-**What it fixes.** The step draws full-height Metal4 stripes across macro power
-pin columns, because the Tiny Tapeout CMOS5L tile has a single-layer PDN and
-pdngen trims its stripes around macros. That connects the pins *physically*. It
-never tells the database they are connected — pdngen writes that `iterm`-to-net
-association itself when it builds a macro grid, and a single-layer PDN cannot
-use a macro grid (`pdn_test/README.md`).
+**Status: does NOT fix `PSM-0069`. Tested and refuted.** Kept because the
+annotation it adds is independently correct, and because the negative result is
+worth not repeating.
 
-**How it shows up.** Every check that reads the database rather than the layout
-disagrees with the layout:
+**What it does.** After the step draws its full-height Metal4 stripes, connect
+each macro's power `ITerm` to the corresponding special net and mark it special.
+The macros genuinely had no such connection: `design__disconnected_pin__count`
+was exactly 2 per macro (`VPWR` and `VGND`) and
+`design__critical_disconnected_pin__count` exactly 1, scaling with macro count
+(2/1 per macro at two macros, 20/10 at ten). The log confirms it runs:
 
-| symptom | with 2 macros | with 10 macros |
+    [INFO] VPWR: 10 macro power pins connected in the database
+    [INFO] VGND: 10 macro power pins connected in the database
+
+**What it does not do.** `PSM-0069` still fails. Against the unpatched run:
+
+| | unpatched | patched |
 |---|---|---|
-| `design__critical_disconnected_pin__count` | 2 | 10 |
-| `design__disconnected_pin__count` | 4 | 20 |
-| `OpenROAD.IRDropReport` | passes | **fails `PSM-0069`** |
-| `design__lvs_error__count` | 0 | 2, both unmatched pins |
+| `PSM-0038` unconnected shape | 25 | 25 |
+| `PSM-0039` unconnected instance | 0 | 11 |
+| `PSM-0069` | fails | fails |
 
-It is exactly one per macro per net, which is the signature: the count scales
-with macro count, not with anything about the routing. The preceding warning
-names a stripe this step drew, e.g.
+**Why the original theory was wrong.** It assumed the unconnected shapes were
+the stripes over macro pin columns. They are not. The 25 unconnected `VPWR`
+shapes run from x = 55.82 to x = 1089.90 at the 44.96 µm stripe pitch — every
+vertical Metal4 stripe across the whole core — while the macro columns sit at
+only x = 45.43, 405.11 and 764.79. So PSM considers the entire stripe network
+sourceless, which macro pin annotation cannot address.
 
-    [PSM-0038] Unconnected shape on net VPWR at
-    (1089.900um, 3.780um) - (1092.000um, 706.860um), layer: Metal4.
+**What is actually known.**
 
-`ERROR_ON_DISCONNECTED_PINS = 0` hides the disconnected-pin count but not
-`PSM-0069`, which lives in a different step. With IR-drop analysis disabled the
-rest of signoff completes and shows the residue clearly: **signoff DRC clean**
-(`magic__drc_error__count` 0, `klayout__drc_error__count` 0) and LVS failing on
-**nothing but the two power pins** — `lvs_net_difference` 0,
-`lvs_device_difference` 0, `lvs_unmatched_device` 0, `lvs_unmatched_net` 0.
-Nothing about the extracted circuit differs. Only the annotation is missing.
+* At two macros (`pdn_test`), the same plugin and the same PDN settings give
+  `PSM-0040 All shapes on net VPWR are connected` and the flow completes.
+* At ten macros, in both configuration C and format D, every vertical stripe is
+  reported unconnected and `PSM-0069` fails.
+* Signoff DRC is clean and LVS fails only on the two power pins, in both
+  formats — reachable by disabling the IR-drop step.
 
-**The fix.** After the stripes are drawn, connect each macro's power `ITerm` to
-the corresponding special net and mark it special — which is what pdngen would
-have done. ~25 lines, no geometry change.
+So it is scale-dependent and the mechanism is open. The next thing worth testing
+is whether the annotation alone clears the 2 LVS unmatched pins with IR drop
+disabled; the patched run quit at IR drop before reaching LVS, so that is
+unmeasured.
 
-**Upstream.** This belongs in `kdp1965/ihp-um-janestreet-prism`. The evidence
-above is a complete report: a passing small case, a failing large one at two
-scales, a precise mechanism, and LVS as the arbiter.
+**Not yet suitable for an upstream report.** A report needs a mechanism, and the
+one that was written down turned out to be wrong.
