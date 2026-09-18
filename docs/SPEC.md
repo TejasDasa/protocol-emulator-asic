@@ -1300,26 +1300,39 @@ grid that is necessarily empty at that point and fails hard. With the recipe in
 violations, zero DRC errors and LVS reporting "Circuits match uniquely".
 
 **Target clock, and what STA says about it.** The Tiny Tapeout template sets
-`CLOCK_PERIOD` to 20 ns, i.e. **50 MHz**. That target is **not met worst-case**.
-Post-route STA on a five-machine design with extracted parasitics
-(`floorplan/`):
+`CLOCK_PERIOD` to 20 ns, i.e. **50 MHz**. That target is **not met worst-case**,
+and grid alignment — the constraint above — is what costs it. Post-route STA on
+the five-machine format D design, changing nothing but the macro x:
 
-| corner | setup | hold |
+| | macros off grid (45.43) | macros on grid (42.55) |
 |---|---|---|
-| slow, 1.08 V, 125 °C | **−1.266 ns VIOLATED** | +0.506 ns MET |
-| typ, 1.20 V, 25 °C | +3.641 ns MET | +0.202 ns MET |
-| fast, 1.32 V, −40 °C | +6.483 ns MET | +0.016 ns MET |
+| setup, slow 1.08 V 125 °C | **+1.678 ns MET** | **−2.200 ns VIOLATED** |
+| setup, typ 1.20 V 25 °C | +7.100 ns MET | +4.695 ns MET |
+| hold, worst corner | +0.105 ns MET | +0.108 ns MET |
+| implied worst-case Fmax | ~54.6 MHz | **~45.1 MHz** |
+| max-slew violations, slow | 26 | 48 |
+| max-cap violations | 7 | 13 |
+| signoff DRC + LVS | LVS 2 errors, IR drop blocked | **all zero** |
 
-**Worst-case frequency is about 47 MHz.** Hold is met at every corner after
-2,218 hold buffers. Two caveats, both material:
+**The trade is not actually a choice.** A design that cannot be signed off
+cannot be taped out, so the aligned floorplan wins regardless of the 9.5 MHz.
+The protocols this chip emulates have large headroom at either clock: the
+fastest reference program, SPI, needs 6.525 cycles per bit.
 
-- **That design is configuration C, not the format this document specifies.**
-  C has a palette lookup D does not and D has an inline 13-bit action decode C
-  does not; the critical paths are different logic and D's Fmax is unmeasured.
-- 115 max-fanout, 4 max-slew and 1 max-cap violations were outstanding, several
-  of them artifacts of an observability port that XOR-reduces signals from every
-  machine into one pin and of a `clk` net with 1,844 terminals. Neither belongs
-  in a design meant to be taped out, so the −1.266 ns is not a floor.
+**Attribution is measured, not assumed.** The aligned result is bit-identical at
+`OPENROAD_THREADS` unset and at 4 (−2.1996929345071647 both times), so the flow
+is deterministic in thread count and the loss is alignment, not flow noise.
+
+**−2.200 ns is a violation, not merely a lower Fmax, and may not be a floor.**
+`RUN_POST_GRT_DESIGN_REPAIR` and `RUN_POST_GRT_RESIZER_TIMING` were off for
+every run above, so nothing buffered against post-routing parasitics — and the
+slew count moving 26 → 48 alongside the slack is consistent with both following
+from longer routes, which is what that pass targets. Whether it closes is
+unmeasured at the time of writing.
+
+Earlier configuration C numbers, for continuity: −1.266 ns slow, about 47 MHz,
+with 115 max-fanout and an observability port that XOR-reduced every machine
+into one pin. That design is not this row format and its critical paths differ.
 
 ---
 
