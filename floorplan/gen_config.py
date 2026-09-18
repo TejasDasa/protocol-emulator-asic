@@ -71,7 +71,7 @@ assert TREE in ("C", "D"), TREE
 # pass that could buffer them. It can also move timing in either direction,
 # which is why it is a separate switch and a separate run.
 REPAIR  = int(sys.argv[9]) if len(sys.argv) > 9 else 0
-THREADS = int(sys.argv[10]) if len(sys.argv) > 10 else 4
+THREADS = (int(sys.argv[10]) if len(sys.argv) > 10 else 4) or None
 assert LAYOUT in ("interleaved", "grouped"), LAYOUT
 
 # ---------------------------------------------------------------- the top
