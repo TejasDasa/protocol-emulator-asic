@@ -1240,16 +1240,57 @@ These are properties of the target process and flow, not of the ISA. They are
 recorded because they constrain any implementation of §12. Full detail is in
 `pdn_test/README.md` and `row-format-decision.md` §5.4.
 
-**Macro placement is quantised.** A `CFGMEM_IHP16` tile carries its power on
-**Metal4**, the same layer as the Tiny Tapeout PDN's only stripes, and pdngen
-trims its stripes around macros. A tile's power pins are reached only by a
-stripe running over them, so tile placement must land on the stripe grid:
+**Macro placement is quantised, and this is the load-bearing physical
+constraint of the whole design.** Get it wrong and nothing else matters: the
+power grid is sourceless, IR-drop analysis cannot run, and the design cannot be
+signed off. It is stated first here because it was the single hardest thing to
+find.
+
+A `CFGMEM_IHP16` tile carries its power on **Metal4**, the same layer as the
+Tiny Tapeout PDN's only stripes, and pdngen trims its stripes around macros. A
+tile's power pins are reached only by a stripe running over them, which an
+`ExtendPowerStripes`-style step must draw back.
+
+**What must land on the grid is the macro's POWER PIN COLUMNS, not the macro
+origin.** This distinction is the whole constraint. A stripe drawn on a pin
+column that coincides with no tile stripe gets no rail vias and is electrically
+isolated — and because every such stripe is isolated, the power network has no
+path to a source at all.
 
 | parameter | value | why |
 |---|---|---|
 | `FP_PDN_VPITCH` | 44.96 | the tile's own VPWR column pitch |
 | `FP_PDN_VSPACING` | 3.52 | tile VPWR→VGND centres are 5.62 µm apart, minus the 2.1 µm stripe width |
-| tile x origin | on the 44.96 µm grid | so pin columns coincide with stripes |
+| macro x origin | `TILE_X0 - PIN_OFF` | **derived, never chosen** |
+| `TILE_X0` | 53.99 | pdngen's first vertical stripe on this die |
+| `PIN_OFF` | 11.44 | first VPWR pin, macro-relative, from `CFGMEM_IHP16.lef` |
+
+Measured both ways on the five-machine design, changing nothing but the macro x:
+
+| | 45.43 (off grid by 2.88 µm) | 42.55 (on grid) |
+|---|---|---|
+| plugin alignment warnings | 143 | **0** |
+| `PSM-0038` unconnected shapes | 25 | **0** |
+| `PSM-0069` | **fails — IR drop cannot run** | absent |
+| worst-case IR drop | unmeasurable | **1.92e-04 V (0.02%)** |
+| `design__lvs_error__count` | 2 | **0** |
+| `magic__drc_error__count` | 0 | 0 |
+| Metal4 routing resource | 95,479 | **105,560 (+10.6%)** |
+| Metal2 / Metal3 GRT overflow | 1174 / 389 | **1107 / 352** |
+
+So the misalignment cost routing resource as well as power connectivity, and the
+aligned design is the first in either row format to report **zero on every
+signoff check**.
+
+Two warnings for anyone re-deriving this:
+
+- **A constant from another floorplan is not a constant.** The offset was
+  exactly 2.88 µm = `CORE_X0` = `LEFT_MARGIN_MULT` × `SITE_W`, because `X0` was
+  carried over from `pdn_test`, whose core origin differs. It is now derived
+  from the stripe grid and the LEF, with an assertion in
+  `floorplan/gen_config.py` that fails naming the offending pin column.
+- **Asserting that the macro ORIGIN is on a grid is not enough.** The origin was
+  on its own grid the whole time. Only the pin columns matter.
 
 **The PDN needs a non-default flow.** An `ExtendPowerStripes`-style step must run
 after `OpenROAD.GeneratePDN` to draw stripes back across the pin columns, and
