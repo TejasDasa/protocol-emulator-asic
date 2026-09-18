@@ -105,7 +105,20 @@ MACRO_W, MACRO_H = 331.20, 86.94
 
 # --- PDN grid, from pdn_test/README.md "The geometry constraint"
 VPITCH = 44.96
-X0 = 45.43                      # first on-grid x that clears the core edge
+# The macro x origin is DERIVED, not chosen. What has to land on the tile stripe
+# grid is the macro's VPWR/VGND PIN COLUMNS, not its origin -- the plugin draws
+# a full-height stripe on each pin column, and a stripe that coincides with no
+# tile stripe gets no rail vias and is electrically isolated. PSM then reports
+# it (PSM-0038) and IRDropReport fails (PSM-0069).
+#
+# X0 = 45.43 was carried over from pdn_test, whose core origin differs. On this
+# 6x4 die with margins 1/1/6/6 it puts every pin column 2.88 um -- exactly
+# CORE_X0 -- off the grid, which is what made 10 macros fail where 2 passed.
+# The plugin prints "pin column at x=... is 2.880 um off the nearest tile
+# stripe" for all 24, and that message went unread for two configurations.
+TILE_X0  = 53.99                # pdngen's first vertical stripe on this die
+PIN_OFF  = 11.44                # first VPWR pin, macro-relative (CFGMEM_IHP16.lef)
+X0 = round(TILE_X0 - PIN_OFF, 2)          # 42.55
 COL_PITCH = VPITCH * 8          # 359.68: smallest multiple of VPITCH >= MACRO_W
 COLS = [X0 + i * COL_PITCH for i in range(3)]
 
@@ -140,6 +153,17 @@ for v in YS:
     assert v >= CORE_Y0 and v + MACRO_H <= CORE_Y0 + CORE_H, f"macro y {v} outside core"
 for x in COLS:
     assert abs((x - X0) / VPITCH - round((x - X0) / VPITCH)) < 1e-6, f"x {x} off grid"
+# The assertion that actually matters: every macro POWER PIN COLUMN must land on
+# a tile stripe. Checking the macro origin alone is what let a 2.88 um offset
+# through -- the origin was on its own grid, just not on pdngen's.
+for x in COLS:
+    for k in range(8):
+        pin = x + PIN_OFF + k * VPITCH
+        off = abs((pin - TILE_X0) / VPITCH - round((pin - TILE_X0) / VPITCH)) * VPITCH
+        assert off < 1e-3, (
+            f"macro at x={x}: power pin column {pin:.2f} is {off:.3f} um off the "
+            f"tile stripe grid ({TILE_X0} + k*{VPITCH}). The stripe drawn on it "
+            f"would get no rail vias and PSM would report it unconnected.")
 assert COLS[-1] + MACRO_W <= CORE_X0 + CORE_W, "columns overflow the core"
 
 # rtl2 puts two more levels of hierarchy above the machine: the TT wrapper and
