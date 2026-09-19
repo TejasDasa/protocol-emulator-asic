@@ -107,6 +107,15 @@ This is a violation against the 50 MHz template target, not a target that was
 met — see `docs/SPEC.md` §16. Every protocol in the conformance set has
 substantial headroom at that clock.
  
+![Metal4 power stripes and the ten macros](docs/img/pdn-macro-grid.png)
+
+*The same layout with everything hidden except the Metal4 power stripes (red)
+and the macro outlines (black): ten CFGMEM_IHP16 instances in three columns of
+4, 4 and 2. Stripes run the full core height at 44.96 um pitch and pass
+straight through the macros, because each macro's power pin columns are placed
+to land on them. Off by 2.88 um and every stripe over a macro connects to
+nothing.*
+
 Two physical constraints are worth knowing before reproducing any of this.
 Instruction-memory macros must be placed on the power-stripe grid, or the
 entire power network is left without a source and signoff fails. And macros
