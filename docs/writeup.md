@@ -6,34 +6,62 @@ the format decision.
 
 ---
 
-## 1. What it is
+## 1. One machine, twelve rows, watching a wire
 
-Five state machines share a Tiny Tapeout 6×4 die on IHP 130 nm `sg13cmos5l`.
-Each runs a 32-row program in a 32-bit instruction format, one row per clock,
-and emulates a wire protocol directly on the pins — UART, SPI, I²C, USB
-low-speed, JTAG, CAN. A row is `test | mode | target | pin_slot | pin_op |
-act_sr | act_c1 | act_c2 | act_tm | act_xx`: evaluate a condition, optionally
-act, optionally drive a pin, choose the next row. There is no instruction
-fetch, no pipeline, and no stall.
+A state machine on this chip watches a pin it never drives, and decides whether
+what it sees is UART:
 
-Programs are loaded at run time over three serial chains, so the chip is not
-committed to any protocol at tape-out.
+> a falling edge; the line still low half a bit later, so not a glitch; eight
+> bit times; a stop bit high where one belongs — eight frames in a row.
 
-## 2. What is being claimed
+That program is **12 rows**. It rejects constant levels, square waves and random
+toggling, and it confirms a real transmitter at any phase, with jitter. Five
+such machines run concurrently, each testing a different candidate baud.
 
-Three things, in descending order of confidence.
+The chip is a **protocol emulator**: five independent state machines on a Tiny
+Tapeout 6×4 die in IHP 130 nm, each executing one 32-bit row per clock, driving
+and reading pins directly. Programs load at run time over serial chains, so the
+silicon is not committed to any protocol at tape-out. Six run cycle-exact
+against device models today — UART TX and RX, SPI mode 0, I²C master, USB
+low-speed token TX, JTAG — plus CAN, which §3 is about.
 
-1. **A 32-bit row ISA is enough to emulate real protocols at line rate.** Six
-   programs run cycle-exact against device models: UART TX and RX, SPI mode 0,
-   I²C master, USB low-speed token TX, JTAG. A seventh, CAN, is the subject of
-   §3. The longest is JTAG at 25 of 32 rows; CAN is 24.
-2. **The chip can decide what a wire is carrying, not only speak it.** A UART
-   detector fits in **12 rows** and confirms a protocol signature — falling
-   edge, still low at mid-bit, eight bit times, stop bit high — eight frames
-   consecutively, while rejecting constant levels, square waves and random
-   toggling. With one machine per candidate baud, five machines cover a
-   **1.77×** baud range (§4.3).
-3. **Two of the shared units are not optimisations but preconditions.** §3.
+## 2. The ceiling is the design
+
+A row costs exactly one clock. There is no fetch, no pipeline, and **no stall** —
+a machine cannot wait, cannot be back-pressured, and cannot take two cycles for
+one row. Everything interesting about this design follows from that.
+
+It is what makes the machine cheap enough to replicate five times. It is why
+bit-level timing is exact rather than approximate. And it imposes a hard limit
+that is unusual in a programmable device: **a program is at most 32 rows**, and
+a protocol either fits or it does not exist.
+
+That limit is not a budget to be managed; it is a boundary with things on both
+sides of it, and this submission reports measurements from both:
+
+| | rows |
+|---|---|
+| UART detector — decides what a wire is carrying | **12** of 32 |
+| CAN 2.0A transmitter, with the §9 wider units | **24** of 32 |
+| JTAG — the longest reference program | 25 of 32 |
+| CAN 2.0A, attempted without those units | **54** — does not exist |
+
+The same no-stall rule has a second consequence, derived rather than assumed
+(§8.1.1): **nothing a row can invoke may be shared between machines.** A shared
+resource can be reached by N rows on the same cycle, serving them needs
+arbitration, arbitration means a machine waits, and there is nowhere for that
+wait to go. That is why the FIFOs, the CRC units and the bit stuffer all
+replicate, and why the price in §3 is per machine rather than per chip.
+
+This document argues three things, in descending order of confidence:
+
+1. **A 32-bit row ISA emulates real protocols at line rate** — seven programs,
+   cycle-exact against models and against RTL.
+2. **The chip can decide what a wire is carrying, not only speak it** — the
+   detector above, with a measured capture window of −5% to +10% of baud, so
+   five machines cover a 1.77× range.
+3. **Two of the shared units are preconditions, not optimisations** — §3, which
+   is the load-bearing claim and the one most worth attacking.
 
 ## 3. CAN: an impossibility argument, and an attempt to break it
 
@@ -193,6 +221,11 @@ finishes with 2,846 GCells of overflow.
 - **622 max-fanout violations**, of which **320 are the vendored macro's own
   internal structure** — 32 per instance, confirmed in a separate two-macro
   design. The remaining 302 are ours, 162 of them one load over the limit.
+  Two levers were tried and neither works: post-GRT design repair made
+  timing worse and left the count at 624, and a tighter synthesis fanout
+  constraint never reaches yosys — it writes an SDC the router and STA read,
+  and produced a byte-identical netlist. With zero router DRC and clean LVS,
+  302 nets between 9 and 17 loads is a note rather than a defect.
 - **Inter-pin skew is unmeasured.** The models have no pin path, so skew
   between a clock and its data — SCK/MOSI, SCL/SDA — is not checked anywhere.
 - **Phase independence is established for the input side only.** UART traffic
