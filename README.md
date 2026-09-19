@@ -87,6 +87,16 @@ I²C require every clock phase to meet its minimum, and the device models
 inject phase offset and jitter rather than producing clock-aligned edges.
  
 ## Physical status
+
+![Five state machines and ten CFGMEM_IHP16 macros on the 6x4 die](docs/img/layout-5sm.png)
+
+*The routed design, rendered from the signed-off GDS by KLayout. The four
+horizontal bands across the upper half are the ten instruction-memory macros,
+two per state machine, grouped into one block; everything below them is the
+contiguous standard-cell region. Macros are placed on the power-stripe grid —
+see below for why that is not optional. Die 1289.28 x 710.64 um, 59.3%
+instance utilization.*
+
  
 Signoff clean at five machines: zero DRC (Magic, KLayout and the router), zero
 LVS errors on every sub-count, zero antenna violations, 0.02% worst-case IR
