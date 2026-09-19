@@ -208,3 +208,18 @@ spaced by a factor of **1.154**, and therefore:
 That does not overturn the multi-candidate answer, but it bounds it: it is a
 way to cover a handful of nearby candidate rates, not a way to find an arbitrary
 unknown baud. Anyone quoting the approach should quote the 1.77x with it.
+
+
+## Shadowing: cut
+
+A second machine monitoring a bus that another machine drives — shadowing — was
+considered as a companion to detection and has been **dropped**, not deferred.
+
+It has no entry in `docs/SPEC.md`, so it would need a specification, an
+implementation and a demonstration. The submission already carries CAN as an
+impossibility argument (`SPEC` §9), inference as a measured 12-row detector, and
+a verification story with ten documented corrections. Adding a fourth capability
+late is how the first three end up underwritten.
+
+The phase and jitter work it was waiting on landed anyway and stands on its own:
+it is what killed the `thalf` survivor and what made the baud window measurable.
