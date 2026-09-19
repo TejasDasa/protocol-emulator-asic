@@ -72,6 +72,11 @@ assert TREE in ("C", "D"), TREE
 # which is why it is a separate switch and a separate run.
 REPAIR  = int(sys.argv[9]) if len(sys.argv) > 9 else 0
 THREADS = (int(sys.argv[10]) if len(sys.argv) > 10 else 4) or None
+# Synthesis fanout target. The liberty says default_max_fanout 8 and the
+# checker uses that, so leaving this at 10 makes synthesis produce nets it
+# considers legal and the checker does not -- which is precisely the 162
+# violations at fanout 9. 0 keeps LibreLane's default.
+MAXFAN  = int(sys.argv[11]) if len(sys.argv) > 11 else 0
 assert LAYOUT in ("interleaved", "grouped"), LAYOUT
 
 # ---------------------------------------------------------------- the top
@@ -250,6 +255,7 @@ cfg = {
     # runs that completed earlier were luckier, not different. Capping this
     # trades wall clock for finishing.
     "OPENROAD_THREADS": THREADS,
+    **({"MAX_FANOUT_CONSTRAINT": MAXFAN} if MAXFAN else {}),
     "RUN_POST_GRT_DESIGN_REPAIR": bool(REPAIR),
     "RUN_POST_GRT_RESIZER_TIMING": bool(REPAIR),
     "RUN_IRDROP_REPORT": SIGNOFF != 1,
@@ -273,7 +279,7 @@ macro_area = len(instances) * MACRO_W * MACRO_H
 core_area = CORE_W * CORE_H
 print(f"NSM={NSM}  macros={len(instances)}  layout={LAYOUT}  density={DENSITY}%  "
       f"halo={HHALO}/{VHALO}")
-print(f"  allow_congestion={ALLOW}  signoff_drc={SIGNOFF}  post_grt_repair={REPAIR}  threads={THREADS}")
+print(f"  allow_congestion={ALLOW}  signoff_drc={SIGNOFF}  post_grt_repair={REPAIR}  threads={THREADS}  max_fanout={MAXFAN or 'default'}")
 print(f"  tree: {TREE} -- " + ("rtl2/, the frozen format, top tt_um_stt"
       if TREE == "D" else f"rtl/, top regenerated from stt_chip.v ({lines} lines)"))
 print(f"  core: {CORE_W} x {CORE_H} = {core_area:.0f} um2 "
