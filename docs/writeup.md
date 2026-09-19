@@ -106,8 +106,15 @@ last=1    S1_1  →   S1_2  →   S1_3  →   S1_4  →   S1_5 → insert 0
 Every state needs the same four rows: wait for the bit boundary (`tmr`), test
 `srbit`, and *two* call sites — because the destination differs depending on
 whether the next bit continues the run or breaks it, and a row has one pair of
-exits. The emit-and-shift work itself is shared as a subroutine, so the
-duplication is in the control flow, not the datapath.
+exits. The emit-and-shift work itself is shared as a subroutine.
+
+**The duplication is control flow, not storage, which is why more registers
+would not fix it.** A spare counter could hold the run length, but the fork by
+polarity would remain: the program still cannot ask whether this bit matches
+the last one, so it still has to be in a different place depending on the
+answer. What is missing is a *test*, not a register. This ISA could have spent
+a test code on “same as the previous bit” and did not — the eleven codes went
+elsewhere — so the cost below is the price of that choice, not an oversight.
 
 | | rows |
 |---|---|
@@ -263,8 +270,17 @@ finishes with 2,846 GCells of overflow.
   constraint never reaches yosys — it writes an SDC the router and STA read,
   and produced a byte-identical netlist. With zero router DRC and clean LVS,
   302 nets between 9 and 17 loads is a note rather than a defect.
-- **Inter-pin skew is unmeasured.** The models have no pin path, so skew
-  between a clock and its data — SCK/MOSI, SCL/SDA — is not checked anywhere.
+- **Inter-pin skew is unmeasured, and it is the one item here where the answer
+  could be bad rather than merely absent.** Every other limit on this list is
+  something not yet known; this is something that could be wrong. The models
+  have no pin path, so skew between a clock and its data — SCK/MOSI, SCL/SDA —
+  is checked nowhere, and a protocol can meet every bit-period assertion while
+  violating a setup time between two pins. The signoff run already emits
+  post-route SDF for all three corners (`final/sdf/`), so resolving this is a
+  matter of running the existing testbenches against the gate netlist with
+  back-annotation, not of generating new data. Until that runs, every timing
+  result here describes when a machine *decides* to change a pin, not when the
+  pin changes.
 - **Phase independence is established for the input side only.** UART traffic
   can now arrive at arbitrary phase with jitter; the SPI and I²C assertions
   measure the machine's own output, where there is no independent phase.
