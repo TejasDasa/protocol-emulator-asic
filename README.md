@@ -1,143 +1,119 @@
-# Protocol emulator — milestone 1: one UART TX pin
-
-An initial Hardcaml UART transmitter and autonomous pin demo. This is a
-reference implementation for the protocol-emulator project, not yet the
-competition's programmable architecture.
-
-## Run using your existing working switch
-
-Extract this directory beside `hardcaml_template_project`, under `~/projects`.
-It is a separate small Dune project. It uses the already installed `hardcaml`
-library and does not require a new switch or another package installation.
-
+# STT — a programmable protocol emulator ASIC
+ 
+An open-source protocol emulator for the [Jane Street ASIC design
+competition](https://blog.janestreet.com/protocol-emulator-asic-competition/),
+targeting IHP's 130nm CMOS5L process through Tiny Tapeout at 6×4 tiles.
+ 
+Five independent state machines bit-bang hardware protocols from firmware.
+Each executes one 32-bit row per clock cycle — no pipeline, no stalls, no
+skipped cycles — which makes protocol timing something you read off the
+program rather than count and hope about. Which protocols the chip speaks is
+reprogrammable after fabrication.
+ 
+Implemented and passing: UART TX, UART RX, SPI mode 0, I²C master, USB
+low-speed token TX, JTAG TAP, CAN, and a UART protocol detector.
+ 
+## Start here
+ 
+- **[`docs/SPEC.md`](docs/SPEC.md)** — the normative specification. The single
+  source of truth for the instruction set, the timing model and the chip
+  boundary. If you read one thing, read this.
+- **[`docs/writeup.md`](docs/writeup.md)** — the argument: what the
+  architecture makes possible, why the shared units exist, and what the
+  verification found.
+- **[`docs/row-format-decision.md`](docs/row-format-decision.md)** — how the
+  row format was chosen, and what the alternatives cost.
+- **[`docs/area-study.md`](docs/area-study.md)** — the area and integration
+  measurements, including §8's record of conclusions that turned out to be
+  wrong.
+## The instruction set in one paragraph
+ 
+A row says one thing: *when this test passes, do these actions, then go
+there*. Ten test codes read the timer, two counters, a shift-register bit,
+input pins, or FIFO status. Thirteen bits encode actions inline across five
+mutually-exclusive groups. Eight bits name a branch target, and a two-bit mode
+derives both the true and false exits from it. There is no implicit
+fall-through — every row carries its own successor, which is what lets a
+single self-looping row be a precise wait. A program is at most 32 rows.
+ 
+## Repository layout
+ 
+| Path | What's in it |
+|---|---|
+| `spec/` | `isa.json`, the machine-readable encoding source, plus the generator and conformance checker |
+| `docs/` | The specification and the written arguments |
+| `rtl2/` | The implementation: five machines, iomux, host interface, TT-legal top |
+| `isa_bench/` | Python ISA models, the protocol programs, and the device models they run against |
+| `rtl/` | **Superseded.** A structural harness written to measure area under the previous row format. It has never passed a functional test and is kept only so the area study stays reproducible. |
+| `floorplan/` | Place-and-route configuration and results |
+| `pdn_test/` | The CFGMEM power-integration recipe and its test harness |
+ 
+## Building and testing
+ 
 ```bash
-cd ~/projects/protocol-emulator-uart
-opam exec --switch=5.2.0+ox -- dune runtest -j 1
-mkdir -p generated
-opam exec --switch=5.2.0+ox -- \
-  dune exec bin/generate_uart.exe -- hello 10000000 115200 \
-  > generated/uart_hello.v
+make check
 ```
-
-`uart_hello` has `clock`, `clear`, and a single `tx` output. After reset it
-repeatedly transmits ASCII `U` (`0x55`). Supply a clock matching the generator
-argument and assert `clear=1` for at least one rising clock edge before use.
-It does not have a power-up initialization guarantee without reset.
-
-Generate the reusable transmitter with its internal byte interface:
-
-```bash
-opam exec --switch=5.2.0+ox -- \
-  dune exec bin/generate_uart.exe -- tx 10000000 115200 \
-  > generated/uart_tx.v
-```
-
-The generator prints timing information to stderr and only Verilog to stdout.
-The clock value is an example for the prototype, not an ASIC timing commitment.
-
-## Contract
-
-| Signal | Direction | Meaning |
-| --- | --- | --- |
-| `clock` | input | Rising-edge core clock |
-| `clear` | input | Active-high synchronous reset; aborts any active frame |
-| `data[7:0]` | input | Byte to transmit |
-| `valid` | input | Producer offers a byte |
-| `ready` | output | Byte can be accepted; low during reset and transmission |
-| `tx` | output | Idle-high serial output |
-
-The `data`, `valid`, and `ready` signals are internal chip interfaces, not
-additional serial pins. They disappear in the autonomous `uart_hello` top.
-All control inputs must be synchronous to `clock`. For the reusable interface,
-a producer keeps `valid` and `data` stable until an edge where `ready=1`.
-
-On an edge where `valid && ready`, the transmitter latches the entire byte
-and drives the start bit low. The format is 8N1: one low start bit, eight
-data bits least-significant first, and one high stop bit. Each bit lasts
-exactly `clocks_per_bit` clocks. `ready` returns high only after the complete
-stop bit. The next byte can be accepted on the next rising edge, giving one
-additional idle clock between frames when `valid` is held high. This version
-has no FIFO and no zero-gap optimization.
-
-Changes to `data` while busy do not change the current frame. A `valid` pulse
-entirely within the busy interval is not queued. Holding `valid` high until
-the next accepting edge supplies the next byte normally.
-
-Reset takes priority over transmission and acceptance. On a rising edge with
-`clear=1`, TX returns high and the partial frame is discarded. The receiver
-may see a malformed frame after a mid-frame reset; the next accepted byte
-starts a fresh frame.
-
-## What hardware is created?
-
-`lib/uart_tx.ml` contains four registers:
-
-* A 10-bit frame shift register, loaded with stop/data/start bits.
-* A 4-bit count of remaining frame bits.
-* A countdown timer for the current bit.
-* A 1-bit inverted TX register, so synchronous clear-to-zero gives idle high.
-
-Only the timer reaching zero advances the frame. TX is driven by the inverted
-output of a single register; the clock is never divided or gated. The widths
-and bit period are elaboration-time parameters in this first milestone.
-
-`clocks_per_bit = round(clock_hz / baud)` and
-`actual_baud = clock_hz / clocks_per_bit`.
-At the default 10 MHz and requested 115,200 baud, the divider is 87 and actual
-baud is approximately 114,942.529 (-0.2235%). Other combinations can have larger
-rounding errors; inspect the generator's reported error before hardware use.
-
-For `0x55`, the ten serial bits are: start `0`, data `1 0 1 0 1 0 1 0`, stop `1`.
-
+ 
+That runs everything: specification drift, latch checks, the frozen-format
+check, the per-machine flop-slope gate, the mutation floor, and every
+benchmark. It exits non-zero on any failure.
+ 
+The encoding is generated, not transcribed. `spec/gen_spec.py` emits the
+tables in `docs/SPEC.md` from `spec/isa.json`, and `spec/conformance.py`
+checks that source against the Python models. A change to the encoding that
+isn't reflected everywhere is a build failure rather than a silent
+inconsistency.
+ 
 ## Verification
-
-`test/test_uart.ml` uses Hardcaml Cyclesim and a pin-level scoreboard. It checks:
-
-* Every byte (0–255) at divisors 1, 2, 3, 7, 16, and 87.
-* Every clock of the start, data, and stop bits, including the exact ready edge.
-* Input-data changes and asserted valid during busy periods.
-* Consecutive frames with valid continuously asserted.
-* Reset at every clock offset in a frame at divisors 1, 3, and 7, followed by
-  a fresh successful frame.
-* The autonomous `U` stream and rejection of an invalid zero divider.
-
-These are ordinary Dune executable tests, with explicit failures rather than
-expect-output promotion. Success prints a line beginning `PASS:`.
-
-Generate a waveform from the same actual Cyclesim outputs:
-
-```bash
-opam exec --switch=5.2.0+ox -- \
-  dune exec test/test_uart.exe -- uart.vcd
-```
-
-This reruns the tests, then emits `uart.vcd` with bytes `0x55` and `0xA5`, a
-10 MHz clock, and 87 clocks per bit. A VCD viewer can open the file. Inputs are
-shown on falling edges and outputs sampled after rising edges; this is a
-cycle-level trace, not an event-level model of combinational propagation.
-
-Validation status at delivery: source reviewed and integer transition-model
-timing checked locally. The delivery workspace has no OCaml/Hardcaml runtime;
-the supplied Hardcaml tests have not been compiled or executed here. Run the
-commands above in the existing WSL switch to validate the implementation.
-
-## Next steps for the ASIC competition
-
-1. Pass these tests and inspect the `U` waveform.
-2. Generate `uart_hello.v` and connect its TX output through the competition's
-   CMOS5L Tiny Tapeout wrapper. Clock/reset and pad mapping belong in that
-   wrapper. The full RTL-to-GDS template is not included here.
-3. Replace the fixed UART framing controller with a programmable pin engine:
-   instruction storage, deterministic wait/count operations, output control,
-   and shift/branch operations. Reuse the UART pin-level tests to validate its
-   first firmware program. Add loading/control interfaces before fabrication.
-
-An external receiver needs a common ground and compatible logic-level input.
-Choose physical voltage levels and board wiring once the target board is known.
-
-## Sources
-
-* [Hardcaml sequential logic](https://docs.hardcaml.org/hardcaml-docs/designing-circuits/sequential_logic/)
-* [Hardcaml Cyclesim](https://docs.hardcaml.org/hardcaml-docs/simulating-circuits/simulation/)
-* [UART frame format](https://onlinedocs.microchip.com/oxy/GUID-EC8D3BAB-0B5E-454F-AB6E-6A7C91C6F103-en-US-3/GUID-585072A2-2328-4EDD-B24F-E2E7672632B5.html)
-* [Competition CMOS5L template](https://github.com/TinyTapeout/ttihp-verilog-template/tree/cmos5l)
+ 
+Four adversarial layers, all of which must pass:
+ 
+- **Cycle-exact lockstep.** The RTL and the Python model step together and are
+  compared every cycle on every architectural register and FIFO operation, not
+  just on final output. Seven programs, and five machines each against their
+  own model.
+- **Mutation.** Programs are corrupted one point at a time — wrong test code,
+  wrong branch mode, shifted target, dropped action, wrong pin op — and the
+  benchmarks must catch it. The gate fails on a score drop *and* on a mutant
+  count drop, which catches a benchmark being quietly removed.
+- **Random programs.** Generated programs reaching encoding paths no
+  hand-written protocol exercises. This is what found the decode bugs mutation
+  structurally cannot reach.
+- **Directed tests.** The instruction-memory load path and the pin boundary,
+  where the lockstep suites are blind because every program loads through the
+  same path.
+Timing is part of conformance: UART TX and USB require zero jitter, SPI and
+I²C require every clock phase to meet its minimum, and the device models
+inject phase offset and jitter rather than producing clock-aligned edges.
+ 
+## Physical status
+ 
+Signoff clean at five machines: zero DRC (Magic, KLayout and the router), zero
+LVS errors on every sub-count, zero antenna violations, 0.02% worst-case IR
+drop.
+ 
+Worst-case setup timing is −2.20 ns at the slow corner, so roughly 45 MHz.
+This is a violation against the 50 MHz template target, not a target that was
+met — see `docs/SPEC.md` §16. Every protocol in the conformance set has
+substantial headroom at that clock.
+ 
+Two physical constraints are worth knowing before reproducing any of this.
+Instruction-memory macros must be placed on the power-stripe grid, or the
+entire power network is left without a source and signoff fails. And macros
+cost more routing resource than their footprint suggests, because they block
+three of the four metal layers beneath them while the fourth carries power —
+area arithmetic overestimates how many fit. Both are documented in
+`docs/SPEC.md` §14 and `pdn_test/README.md`.
+ 
+## Known limits
+ 
+Inter-pin skew is unmeasured — the model has no pin path, and skew between a
+clock and its data is the failure mode that matters in silicon. Phase
+independence has been tested on inputs only. Of 622 max-fanout violations, 320
+are inside the vendored memory macro and outside this design's control; the
+remaining 302 survived both available levers. `docs/SPEC.md` §16 is the
+complete list.
+ 
+## License
+ 
+Open source, as the competition requires. See `LICENSE`.
