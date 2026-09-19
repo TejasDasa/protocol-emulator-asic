@@ -79,12 +79,49 @@ falsification attempt is the evidence.
 `isa_bench/can_soft.py` does this and is measured, not estimated.
 
 **Result 1 — bit stuffing in rows costs 54 rows against a 32-row ceiling.**
-Tracking a run of five identical bits needs `(last bit, run length)` somewhere
-testable. Nothing in the live action set chains one register into another, so
-that state has to live in the program counter: ten states, each needing a wait
-row, a `srbit` test row and two call rows, plus a shared emit subroutine and
-the surrounding frame. 54 rows. The toolchain rejects it because the ceiling is
-32.
+
+The reason is one missing test. CAN stuffs after five identical bits, so a
+program must know whether the bit it is about to send *equals the one it just
+sent*. `srbit` reports the value of the next bit. **Nothing reports the previous
+one**, and no test compares them — the eleven live tests are listed above.
+
+So the previous bit has to be remembered, and there is no register free to
+remember it in: `sr` holds the data being shifted, `cnt` the bit position, `c2`
+the byte count, and the CRC registers their own state. The only remaining place
+to store it is **the program counter itself** — the program forks into two
+parallel chains, one meaning "the last bit was 0" and one meaning "the last bit
+was 1".
+
+The run length has nowhere to live either, so each chain unrolls into five
+states. That gives **10 states**, `(last bit, run length)` for bit ∈ {0,1} and
+run ∈ 1..5:
+
+```
+          run=1     run=2     run=3     run=4     run=5
+last=0    S0_1  →   S0_2  →   S0_3  →   S0_4  →   S0_5 → insert 1
+            ↑ ↓       ↑ ↓       ↑ ↓       ↑ ↓
+last=1    S1_1  →   S1_2  →   S1_3  →   S1_4  →   S1_5 → insert 0
+```
+
+Every state needs the same four rows: wait for the bit boundary (`tmr`), test
+`srbit`, and *two* call sites — because the destination differs depending on
+whether the next bit continues the run or breaks it, and a row has one pair of
+exits. The emit-and-shift work itself is shared as a subroutine, so the
+duplication is in the control flow, not the datapath.
+
+| | rows |
+|---|---|
+| the 10 `(last bit, run)` states | **34** |
+| run of 5 reached: insert the complement | 2 |
+| shared emit subroutine | 3 |
+| byte boundary and reload | 3 |
+| arm: reset CRC, stuffer, counters | 4 |
+| CRC sequence and trailer | 8 |
+| **total** | **54** |
+
+The toolchain rejects it: `SttProgram` raises at 33. The hardware stuffer
+replaces all 36 control-flow rows with one test, `stall`, which asks the
+stuffer what it is about to do — and the same program is **24 rows**.
 
 **Result 2 — and unlimited rows would not save it.** CAN stuffs the CRC
 sequence too. In the data phase a program can see the bit it is about to send,
