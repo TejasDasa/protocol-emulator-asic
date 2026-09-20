@@ -9,7 +9,7 @@ Inputs are the signed-off five-machine run — `floorplan/runs/RUN_2026-09-18_00
 zero DRC, zero LVS errors, 0.02% IR drop — specifically `final/nl/tt_um_stt.nl.v`
 and `final/sdf/<corner>/`.
 
-## Three things that silently break this
+## Four things that silently break this
 
 Each was found by bisection, and each fails quietly rather than loudly.
 
@@ -58,6 +58,26 @@ With it, the same clock-leaf probe resolves real picoseconds:
 | 101 | 813 ps | 509 ps |
 | 35 | 856 ps | 537 ps |
 | spread over 7 leaves | **43 ps** | **28 ps** |
+
+**4. A testbench settle shorter than the clock-to-output delay.** The last
+blocker, and the only one that is not Icarus' fault. The instruction loader
+raises busy on `uo_out[0]`, and a testbench that reads that pin straight after
+`RisingEdge` gets its pre-edge value, so a busy that has just risen reads as
+idle and the next bit is lost -- one bit per 32-bit word. The shared helper in
+`tb/steps.py` avoids this with a 1 ns settle past the edge, which is ample at
+RTL where the pin changes with zero delay.
+
+It is not ample here. Back-annotated, that pin changes 0.7 to 1.9 ns of real
+time after the edge, so a 1 ns settle reads the old value again and the race
+returns at gate level *only* -- which is exactly the shape that sends you
+looking at the netlist. `tb/test_skew.py` settles for half a clock period,
+which is longer than any clock-to-output delay in the design and also gives
+the driven bit half a period of setup.
+
+The general rule: in a back-annotated simulation, any testbench delay that was
+chosen as "small enough not to matter" has to be rechecked against the delays
+being annotated. `make rtl2-imemload` checks the consequence directly, by
+reading the instruction memory back and comparing it word for word.
 
 ## Running it
 

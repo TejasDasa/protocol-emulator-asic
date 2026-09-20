@@ -44,15 +44,42 @@ HOST_STB, HOST_DIN, HOST_DOUT = 15, 14, 13   # SPEC 11.2, on the uio side
 FRAME = 16
 
 
+async def settle():
+    """Move past the clock edge before reading or driving anything.
+
+    Not cosmetic. cocotb applies a .value write at the start of the next
+    timestep and returns from RisingEdge before the design's combinational
+    logic has settled, so reading uo_out[0] straight after the edge reads the
+    busy flag as it was BEFORE the edge. A busy that has just gone high reads
+    as idle, the next bit is presented into a busy memory, and that bit is
+    lost. One dropped bit in a 1024-bit instruction-memory walk is enough to
+    zero a row, and a zeroed row branches to 0 and does nothing -- which is
+    what made every pin sit still. See SPEC 16.
+    """
+    # Half a clock, not a token delta. The busy flag reaches uo_out[0] through
+    # a real clock-to-output delay -- 0.7 to 1.9 ns here -- so a settle shorter
+    # than that reads the pin before it has changed and the race comes back at
+    # gate level only. Half a period also gives the driven bit half a period of
+    # setup, which is what the load path is entitled to.
+    await Timer(PERIOD_NS // 2, unit="ns")
+
+
+
 async def shift_ctl(dut, enable_bit, bits, nbits):
     for i in range(nbits):
+        stalled = 0
         while (int(dut.uo_out.value) & 1) if dut.uo_out.value.is_resolvable else 0:
             dut.ui_in.value = 0
             await RisingEdge(dut.clk)
+            await settle()
+            stalled += 1
+            assert stalled < 300, f"imem busy never cleared at bit {i}"
         dut.ui_in.value = (1 << enable_bit) | (((bits >> i) & 1) << 4)
         await RisingEdge(dut.clk)
+        await settle()
     dut.ui_in.value = 0
     await RisingEdge(dut.clk)
+    await settle()
 
 
 async def host_frame(dut, sel, wr, data):
@@ -66,8 +93,10 @@ async def host_frame(dut, sel, wr, data):
     for k in range(15, -1, -1):
         dut.uio_in.value = (1 << (HOST_STB - 8)) | (((word >> k) & 1) << (HOST_DIN - 8))
         await RisingEdge(dut.clk)
+        await settle()
     dut.uio_in.value = 0
     await RisingEdge(dut.clk)
+    await settle()
 
 
 @cocotb.test()
@@ -131,17 +160,30 @@ async def skew(dut):
             await RisingEdge(dut.clk)
             last_clk[0] = get_sim_time("ps")
 
-    def pin_handle(pin):
-        return (dut.uo_out, pin) if pin < 8 else (dut.uio_out, pin - 8)
+    def pin_handle(slot):
+        """Where this slot's edge actually appears.
+
+        An open-drain slot never drives its pin high: it pulls low by asserting
+        the output enable and releases to let the pull-up do the rest, with the
+        data leg held at 0. So its transition is on uio_oe, not uio_out, and
+        watching uio_out reports a pin that never moves. That is exactly what
+        I2C reported -- SDA and SCL, both open drain, NO TRANSITIONS, while
+        every push-pull pair measured normally. The bus level is the inverse of
+        the enable, and the edge timing is the enable's.
+        """
+        pin = pin_of[slot]
+        if slot in od:
+            return dut.uio_oe, pin - 8, True
+        return (dut.uo_out, pin, False) if pin < 8 else (dut.uio_out, pin - 8, False)
 
     async def watch_pin(slot):
-        sig, bit = pin_handle(pin_of[slot])
+        sig, bit, invert = pin_handle(slot)
         prev = None
         while True:
             await Edge(sig)
             if not sig.value.is_resolvable:
                 continue
-            v = (int(sig.value) >> bit) & 1
+            v = ((int(sig.value) >> bit) & 1) ^ (1 if invert else 0)
             if prev is not None and v != prev:
                 d = get_sim_time("ps") - last_clk[0]
                 if 0 < d < PERIOD_NS * 1000:

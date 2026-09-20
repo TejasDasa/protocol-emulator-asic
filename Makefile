@@ -324,6 +324,15 @@ rtl2-slope: lib-check
 rtl2-chip:
 	@cd rtl2 && $(COCOTB_PY) tb/run_chip.py
 
+# Does the instruction memory hold what was shifted into it? Every lockstep
+# suite loads through this one path, so a load that drops bits is invisible to
+# all of them -- the machine simply sits still. test_skew reimplemented the
+# shift loop without the settle past the clock edge, read imem_ld_busy as it
+# was before the edge, and lost exactly one bit per 32-bit word boundary.
+.PHONY: rtl2-imemload
+rtl2-imemload:
+	@cd rtl2 && $(COCOTB_PY) tb/run_imemload.py
+
 # Directed hostbuf test: depth, overflow, underflow, sticky flags. The chip
 # test never fills a FIFO -- that is what depth 4 is for -- so the boundary
 # behaviour SPEC section 9 specifies needs its own test.

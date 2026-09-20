@@ -126,9 +126,12 @@ area arithmetic overestimates how many fit. Both are documented in
  
 ## Known limits
  
-Inter-pin skew is unmeasured — the model has no pin path, and skew between a
-clock and its data is the failure mode that matters in silicon. Phase
-independence has been tested on inputs only. Of 622 max-fanout violations, 320
+Inter-pin skew is measured, by SDF back-annotated gate-level simulation of the
+signed-off netlist at both corners: worst 0.707 ns, every pair passing with two
+to three orders of magnitude of margin (`docs/skew-report.md`). That covers
+output pins only. Setup and hold on the pins a machine *reads* — MISO, TDO, SDA
+when the target drives it — has not been attempted. Phase independence has been
+tested on inputs only. Of 622 max-fanout violations, 320
 are inside the vendored memory macro and outside this design's control; the
 remaining 302 survived both available levers. `docs/SPEC.md` §16 is the
 complete list.

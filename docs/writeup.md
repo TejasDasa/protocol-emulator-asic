@@ -198,7 +198,7 @@ waveform *and* to leave the default byte-identical.
 
 ### 4.3 What verification found, and the failure modes behind it
 
-Ten wrong conclusions were caught by measurement. Each is recorded with the
+Fourteen wrong conclusions were caught by measurement. Each is recorded with the
 mistake named, because the pattern matters more than the individual errors.
 
 | # | The wrong conclusion | How it was caught | Failure mode |
@@ -214,9 +214,11 @@ mistake named, because the pattern matters more than the individual errors.
 | 9 | A CAN device model existed | Attempting to use it | **A file's existence taken for a working model.** `feed()` was never called and referenced an attribute that is never assigned |
 | 10 | Post-GRT repair improves timing | Comparing at the same flow stage | **Mid-flow metrics compared against post-route ones.** The repaired run's mid-PnR numbers are *identical* to the baseline's — 1.4535804082934107, 0, 128 — and both lose ~3.65 ns to extraction |
 | 11 | The gate-level simulation showed no inter-pin skew at all | Two independent sources disagreeing: 134 clock leaves reporting an identical 1000 ps arrival at *both* corners, against STA's 0.39–0.51 ns | **A tool silently quantizing away the quantity being measured.** Icarus rounds annotated SDF delays to the cell's time *unit* (1 ns), not its precision, so 0.250 ns annotates as 0 and 0.830 ns as 1 ns. A design whose skew is tens of picoseconds simulates as having none — and reports a clean zero rather than an error |
-| 12 | The design fails a SPI device's setup requirement | Reading what the program actually does: it drives MOSI 15 cycles ahead of the SCK rise | **A correction term compared against a requirement as though it were the whole quantity.** Skew is not setup time. The program creates ~333 ns of separation and skew erodes it by 1.88 ns; what must clear t<sub>DSU</sub> is the separation, not the erosion. Comparing the erosion turned 330 ns of margin into an apparent failure |
+| 12 | The design fails a SPI device's setup requirement | Reading what the program actually does: it drives MOSI 15 cycles ahead of the SCK rise | **A correction term compared against a requirement as though it were the whole quantity.** Skew is not setup time. The program creates ~333 ns of separation and skew erodes it by well under a nanosecond; what must clear t<sub>DSU</sub> is the separation, not the erosion. Comparing the erosion turned ~331 ns of margin into an apparent failure |
+| 13 | The machines never drive pins at gate level, so the gate-level flow is what is broken | Running the same testbench against behavioural RTL, where it failed identically in 30 seconds | **A symptom blamed on the newest thing in the stack, without checking the oldest.** The gate netlist, the SDF and the annotation were all new, so all three were suspected for days. The bug was in the testbench and present everywhere: `test_skew` reimplemented the instruction-shift loop instead of importing the shared one, and left out the settle past the clock edge, so it read `imem_ld_busy` as it was BEFORE the edge. A busy that had just gone high read as idle, the next bit went into a busy memory, and exactly one bit was lost at every 32-bit word boundary — word N came back as word N shifted right by N. Row 0 survived, so the machine started, consumed a byte and pulled CS low before executing a garbage row 1 that branched to 0 and stopped, which is why it looked alive |
+| 14 | Skew is 1.88 ns at the typical corner and 0.68 ns at the slow one | Simulating it: 0.451 ns typical, 0.707 ns slow | **A number that was physically backwards and went unchallenged because nothing depended on it.** Skew here is the difference of two delays, so it must shrink as the corner gets faster; a typical corner worse than the slow one describes no chip. It was printed in bold as the headline figure. Every pair passed by two to three orders of magnitude either way, and that margin is exactly what kept the error invisible — no downstream conclusion was sensitive enough to it to fail |
 
-Four of these twelve are the same mistake: reading a signal without asking what
+Four of these fourteen are the same mistake: reading a signal without asking what
 the failing case does with that same signal. It is recorded here because naming
 it is what stopped the fifth — and the eleventh was caught the same way, by
 asking what a *second* source said about the same quantity.
@@ -228,7 +230,40 @@ skew measurement would have been a table of zeros and a false conclusion that
 the design has none. The rule it leaves behind: **when a measurement comes back
 zero, check that the instrument can represent a non-zero answer.**
 
-The twelfth is a different shape again, and the one most likely to recur: not a broken check or a misread signal, but a **category error about what is being measured**. Every number in it was correct. The skew was 1.88 ns, the requirement was 1 ns, and the comparison was meaningless, because the two quantities are not the same kind of thing. A number can be right, its source can be right, and the sentence built from them can still be false.
+The twelfth is a different shape again, and the one most likely to recur: not a broken check or a misread signal, but a **category error about what is being measured**. Every number in it was correct as then measured -- 1.88 ns of skew, itself a static figure that the fourteenth later corrected to 0.707 ns. The requirement was 1 ns, and the comparison was meaningless, because the two quantities are not the same kind of thing. A number can be right, its source can be right, and the sentence built from them can still be false.
+
+The thirteenth is the cheapest lesson here and was the most expensive to
+learn. Every boundary output sat at 0 for 600 cycles after a load whose busy
+handshake demonstrably worked, in a gate-level flow where the netlist, the
+SDF and the annotation wrapper were all new. All three were suspected, in
+that order, for days. The same testbench run against behavioural RTL — the
+oldest, most-tested thing in the stack — failed identically, in thirty
+seconds, and eliminated the entire gate-level hypothesis space at once. The
+rule it leaves behind: **when a symptom appears in a new environment,
+reproduce it in the old one before debugging the new one.** What made the
+false trail so plausible was that the machine really did start: row 0 was the
+one instruction word that survived the corruption intact, so it ran, consumed
+a host byte and pulled CS low before falling into a zeroed row.
+
+It also shows what the duplication cost. Six testbenches drive this load path
+and five of them import one shared, correct, commented shift loop;
+`test_skew` was written fresh and reimplemented it without the settle. There
+is now a directed test — `rtl2/tb/test_imemload.py` — that reads the
+instruction memory back and compares it word for word, so the failure is
+caught by the property rather than by whichever copy of the loop is in use.
+It reports the mechanism directly: *row N came back as row N shifted right by
+N, so N bits were dropped, one per word boundary*. Removing the settle again
+makes it fail, which is the only evidence that a regression test is worth
+anything.
+
+The fourteenth is the quietest failure mode in the table, because nothing
+broke. The static estimate reported more skew at the typical corner than at
+the slow one, which for a difference of two delays cannot happen; the figure
+was set in bold as the headline result and nobody asked. It survived because
+every pair passed by two to three orders of magnitude, so no downstream
+conclusion was sensitive enough to the number to fail when it was wrong. A
+margin large enough to make a result safe is also large enough to stop
+anything from checking it.
 
 The one diagnostic that was correct throughout was printed by the PDN plugin on
 every affected run, in both row formats, and went unread:

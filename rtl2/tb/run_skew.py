@@ -23,7 +23,8 @@ from cocotb_tools.runner import get_runner
 from run_tests import failures
 
 CORNERS = {"slow": "nom_slow_1p08V_125C", "typ": "nom_typ_1p20V_25C"}
-PROGRAMS = ["spi", "i2c", "jtag", "usb"]
+PROGRAMS = os.environ.get("SKEW_PROGS", "spi,i2c,jtag,usb").split(",")
+CYCLES = os.environ.get("SKEW_CYCLES", "6000")
 
 
 def prepared_sdf(corner):
@@ -70,6 +71,7 @@ def main():
                 test_dir=HERE, build_dir=os.path.join(RTL, "sim_build_skew"),
                 timescale=("1ns", "1ps"),
                 extra_env={"PROG": prog, "CORNER": corner, "SDF_FILE": sdf,
+                           "SKEW_CYCLES": CYCLES,
                            "PYTHONPATH": HERE + os.pathsep + BENCH},
                 results_xml=f"results_skew_{prog}_{corner}.xml",
             )
