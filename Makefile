@@ -192,6 +192,7 @@ check: spec-check
 	@$(MAKE) --no-print-directory check-pinmap
 	@$(MAKE) --no-print-directory check-phase
 	@$(MAKE) --no-print-directory check-config
+	@$(MAKE) --no-print-directory check-fpga-rom
 	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
 	@for r in $(COMB_RUNS); do \
 	   test -f $(BUILD)/$$r.log && python3 scripts/check_area.py $(BUILD)/$$r.log --comb-ok || true; \
@@ -208,6 +209,16 @@ check: spec-check
 .PHONY: check-config
 check-config:
 	@cd isa_bench && python3 config_check.py
+
+# The generated FPGA ROM must mean what the hardware will read. isa_bench
+# simulates UART TX cycle-accurately, but from the benchmark's own parameters;
+# nothing covered SttCore -> config_word -> stt_rom.vh -> stt_config.v. This
+# decodes the emitted stream and checks it against the widths the RTL computes
+# for its own shift registers. A stream N bits short scales the timer period
+# by 2^N, which is silent. FPGA bring-up only, but cheap and pure Python.
+.PHONY: check-fpga-rom
+check-fpga-rom:
+	@python3 scripts/check_fpga_rom.py
 
 # Mutation score is a validity gate, not a report: if it falls, the benchmarks
 # got weaker. That is how the SPI/I2C timing gap survived unnoticed.
