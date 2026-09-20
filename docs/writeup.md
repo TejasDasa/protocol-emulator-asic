@@ -214,8 +214,9 @@ mistake named, because the pattern matters more than the individual errors.
 | 9 | A CAN device model existed | Attempting to use it | **A file's existence taken for a working model.** `feed()` was never called and referenced an attribute that is never assigned |
 | 10 | Post-GRT repair improves timing | Comparing at the same flow stage | **Mid-flow metrics compared against post-route ones.** The repaired run's mid-PnR numbers are *identical* to the baseline's — 1.4535804082934107, 0, 128 — and both lose ~3.65 ns to extraction |
 | 11 | The gate-level simulation showed no inter-pin skew at all | Two independent sources disagreeing: 134 clock leaves reporting an identical 1000 ps arrival at *both* corners, against STA's 0.39–0.51 ns | **A tool silently quantizing away the quantity being measured.** Icarus rounds annotated SDF delays to the cell's time *unit* (1 ns), not its precision, so 0.250 ns annotates as 0 and 0.830 ns as 1 ns. A design whose skew is tens of picoseconds simulates as having none — and reports a clean zero rather than an error |
+| 12 | The design fails a SPI device's setup requirement | Reading what the program actually does: it drives MOSI 15 cycles ahead of the SCK rise | **A correction term compared against a requirement as though it were the whole quantity.** Skew is not setup time. The program creates ~333 ns of separation and skew erodes it by 1.88 ns; what must clear t<sub>DSU</sub> is the separation, not the erosion. Comparing the erosion turned 330 ns of margin into an apparent failure |
 
-Four of these eleven are the same mistake: reading a signal without asking what
+Four of these twelve are the same mistake: reading a signal without asking what
 the failing case does with that same signal. It is recorded here because naming
 it is what stopped the fifth — and the eleventh was caught the same way, by
 asking what a *second* source said about the same quantity.
@@ -226,6 +227,8 @@ clean-looking answer to "how much skew is there?". Unnoticed, the inter-pin
 skew measurement would have been a table of zeros and a false conclusion that
 the design has none. The rule it leaves behind: **when a measurement comes back
 zero, check that the instrument can represent a non-zero answer.**
+
+The twelfth is a different shape again, and the one most likely to recur: not a broken check or a misread signal, but a **category error about what is being measured**. Every number in it was correct. The skew was 1.88 ns, the requirement was 1 ns, and the comparison was meaningless, because the two quantities are not the same kind of thing. A number can be right, its source can be right, and the sentence built from them can still be false.
 
 The one diagnostic that was correct throughout was printed by the PDN plugin on
 every affected run, in both row formats, and went unread:
