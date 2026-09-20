@@ -1,5 +1,9 @@
 # Formal properties of the STT core. One task per property so each is proved,
 # and negative-tested, on its own. See docs/formal.md.
+#
+# Engine is `abc pdr` (IC3): unbounded and complete for safety properties, so a
+# PASS is a proof rather than a depth. The P5 timer tasks are the exception and
+# say so -- see the P5 block below and docs/formal.md P5.
 [tasks]
 p1
 p1_break_ret
@@ -16,7 +20,14 @@ p3_c_break
 p3_d_break
 p3_e_break
 p3_srwidth
-p5
+p5_lemma
+p5_c
+p5_a_w8
+p5_b_w8
+p5_break_fire
+p5_break_wrap
+p5_break_period
+p5_period
 
 [options]
 mode prove
@@ -43,14 +54,40 @@ p3_b:        read -formal -DFORMAL -DP3_COMMON -DP3_B stt_core.v
 p3_c:        read -formal -DFORMAL -DP3_COMMON -DP3_C stt_core.v
 p3_d:        read -formal -DFORMAL -DP3_COMMON -DP3_D stt_core.v
 p3_e:        read -formal -DFORMAL -DP3_COMMON -DP3_E stt_core.v
-# Not a negative test: (a) with the sr_width precondition removed. It FAILS,
-# which is the evidence for the SPEC 16.1 gap.
 p3_b_break:  read -formal -DFORMAL -DP3_COMMON -DP3_B -DBREAK_P3B stt_core.v
 p3_c_break:  read -formal -DFORMAL -DP3_COMMON -DP3_C -DBREAK_P3C stt_core.v
 p3_d_break:  read -formal -DFORMAL -DP3_COMMON -DP3_D -DBREAK_P3D stt_core.v
 p3_e_break:  read -formal -DFORMAL -DP3_COMMON -DP3_E -DBREAK_P3E stt_core.v
+# Not a negative test: (a) with the sr_width precondition removed. It FAILS,
+# which is the evidence for the SPEC 16.1 gap.
 p3_srwidth:  read -formal -DFORMAL -DP3_COMMON -DP3_A -DP3_NO_CFG_ASSUME stt_core.v
-p5: read -formal -DFORMAL -DP5 stt_core.v
+
+# ---- P5, the timer -------------------------------------------------------
+# Bit-level PDR does not scale to a 16-bit down-counter compared against a
+# symbolic 16-bit period: p5_a proves in 1 s at TIMER_W=8 and does not finish
+# in 5 minutes at 16. So the timer invariants are reported two ways, and
+# docs/formal.md P5 states which is which:
+#   *_w8   PROVED for every period, at a reduced counter width
+#   *_bmc  BOUNDED to the stated depth, at the real width of 16
+# p5_lemma and p5_c are PROVED at the real width.
+p5_lemma:        read -formal -DFORMAL -DP5_COMMON -DP5_LEMMA stt_core.v
+p5_c:            read -formal -DFORMAL -DP5_COMMON -DP5_C stt_core.v
+p5_a_w8:         read -formal -DFORMAL -DP5_COMMON -DP5_LEMMA_ASSUME -DP5_A stt_core.v
+p5_b_w8:         read -formal -DFORMAL -DP5_COMMON -DP5_LEMMA_ASSUME -DP5_A -DP5_B stt_core.v
+p5_break_fire:   read -formal -DFORMAL -DP5_COMMON -DP5_LEMMA_ASSUME -DP5_A -DP5_B -DP5_C -DBREAK_P5_FIRE stt_core.v
+p5_break_wrap:   read -formal -DFORMAL -DP5_COMMON -DP5_LEMMA_ASSUME -DP5_A -DBREAK_P5_WRAP stt_core.v
+p5_break_period: read -formal -DFORMAL -DP5_COMMON -DP5_LEMMA_ASSUME -DP5_A -DP5_B -DBREAK_P5_PERIOD stt_core.v
+# Not a negative test: the same property without the P >= 2 precondition.
+# It FAILS, which is the evidence for the SPEC 16.1 gap.
+p5_period:       read -formal -DFORMAL -DP5_COMMON -DP5_A -DP5_NO_CFG_ASSUME stt_core.v
+
+p5_a_w8:         chparam -set TIMER_W 8 stt_core
+p5_b_w8:         chparam -set TIMER_W 8 stt_core
+p5_break_fire:   chparam -set TIMER_W 8 stt_core
+p5_break_wrap:   chparam -set TIMER_W 8 stt_core
+p5_break_period: chparam -set TIMER_W 8 stt_core
+p5_period:       chparam -set TIMER_W 8 stt_core
+
 prep -top stt_core
 # The core resets asynchronously; the AIGER engines need a synchronous model.
 async2sync

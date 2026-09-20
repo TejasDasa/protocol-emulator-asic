@@ -1,0 +1,32 @@
+# The timer invariants at the design's real counter width of 16.
+#
+# Bit-level PDR does not converge on a 16-bit down-counter compared against a
+# symbolic 16-bit period, so these are BOUNDED results: proved for every
+# execution of `depth` cycles from reset, and silent about cycle depth+1.
+# The unbounded results are in stt_core.sby at TIMER_W=8, where the same
+# properties are proved for every period. docs/formal.md P5 says which is which
+# and why both are reported.
+[tasks]
+p5_a_bmc
+p5_b_bmc
+
+[options]
+mode bmc
+depth 80
+aigsmt none
+
+[engines]
+abc bmc3
+
+[script]
+p5_a_bmc: read -formal -DFORMAL -DP5_COMMON -DP5_LEMMA_ASSUME -DP5_A stt_core.v
+p5_b_bmc: read -formal -DFORMAL -DP5_COMMON -DP5_LEMMA_ASSUME -DP5_A -DP5_B stt_core.v
+prep -top stt_core
+async2sync
+techmap
+setundef -undriven -anyseq
+opt -fast
+
+[files]
+../stt_core.v
+../stt_isa.vh

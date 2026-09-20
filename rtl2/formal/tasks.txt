@@ -22,3 +22,13 @@ stt_fifo:p4_d:pass:P4d sticky flags never clear
 stt_fifo:p4_break_full:fail:P4 negative -- full without the wrap-bit check
 stt_fifo:p4_break_ovwr:fail:P4 negative -- push accepted when full
 stt_fifo:p4_break_sticky:fail:P4 negative -- overflow flag not sticky
+stt_core:p5_lemma:pass:P5 lemma -- a half-period reload never exceeds a full one
+stt_core:p5_a_w8:pass:P5a timer never exceeds P-1 (PROVED, TIMER_W=8)
+stt_core:p5_b_w8:pass:P5b exactly P cycles between undisturbed ticks (PROVED, TIMER_W=8)
+stt_core_bmc:p5_a_bmc:pass:P5a at the real width of 16 (BOUNDED, depth 80)
+stt_core_bmc:p5_b_bmc:pass:P5b at the real width of 16 (BOUNDED, depth 80)
+stt_core:p5_c:pass:P5c a timer action on a failing row changes nothing
+stt_core:p5_break_fire:fail:P5 negative -- trst/thalf apply on failing rows
+stt_core:p5_break_wrap:fail:P5 negative -- no reload at zero
+stt_core:p5_break_period:fail:P5 negative -- reload one short
+stt_core:p5_period:fail:P5 without the P >= 2 precondition -- the SPEC 16.1 gap

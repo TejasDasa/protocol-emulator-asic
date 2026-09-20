@@ -478,10 +478,26 @@ module stt_core #(
   wire [TIMER_W-1:0] half_m1   = (cfg_period >> 1) - 1'b1;
   reg  [TIMER_W-1:0] tcount_next;
   always @* begin
+`ifdef BREAK_P5_FIRE
+    // Negative test only: trst and thalf apply whether or not the test
+    // passed, against SPEC 8.4's "only on a row whose test passed".
+    if      (act_trst)         tcount_next = period_m1;
+    else if (act_thalf)        tcount_next = half_m1;
+`else
     if      (fire & act_trst)  tcount_next = period_m1;
     else if (fire & act_thalf) tcount_next = half_m1;
+`endif
+`ifdef BREAK_P5_WRAP
+    // Negative test only: no reload at zero, so the counter wraps to 65535.
+    else                       tcount_next = tcount - 1'b1;
+`elsif BREAK_P5_PERIOD
+    // Negative test only: reload one short, so the period is P-1 not P.
+    else if (tick)             tcount_next = period_m1 - 1'b1;
+    else                       tcount_next = tcount - 1'b1;
+`else
     else if (tick)             tcount_next = period_m1;
     else                       tcount_next = tcount - 1'b1;
+`endif
   end
 
   // ---- registers --------------------------------------------------------
@@ -571,6 +587,17 @@ module stt_core #(
   reg f_past_valid = 1'b0;
   always @(posedge clk) f_past_valid <= 1'b1;
   always @(posedge clk) if (!f_past_valid) assume (!rst_n);
+
+  // Environment assumption, discharged by the enclosing design rather than
+  // proved here: a core is never enabled while it is held in reset.
+  // stt_chip drives this port from `machines_en = ena & run_dly[1]`, and
+  // run_dly is cleared by !rst_n, so en is low throughout reset and for two
+  // cycles after it. It matters: the asynchronous reset leaves tcount at 0
+  // rather than at P-1 -- the P-1 arrives through the !en branch, once the
+  // configuration has been shifted in -- so a core enabled during reset
+  // would hold a timer value one reload short for a cycle. Unreachable as
+  // instantiated, and P5 is stated for how it is instantiated.
+  always @* if (!rst_n) assume (!en);
 
 `ifdef P1
   // P1 -- branch resolver totality (SPEC section 5).
@@ -674,8 +701,8 @@ module stt_core #(
   // property with the assumption removed, and it FAILS.
   always @* assume (cfg_sr_width >= 4'd1 && cfg_sr_width <= SR_W[3:0]);
 `endif
-
 `endif
+
 `ifdef P3_A
   // (a) The variable bit-select the shift register is read through is in
   //     range. This is what the precondition buys, stated explicitly so that
@@ -732,6 +759,98 @@ module stt_core #(
     assert ($stable(link));
   end
 `endif
+
+`ifdef P5_COMMON
+  // P5 -- the timer free-runs on exactly one cycle in P (SPEC section 8.4).
+
+`ifndef P5_NO_CFG_ASSUME
+  // Configuration precondition. thalf reloads to P/2-1, which underflows to
+  // 65535 for P < 2, and "reload to P-1" means nothing at P = 0. Neither
+  // section 2 nor section 8.4 gives P a range and nothing clamps the field;
+  // recorded as a gap in section 16.1. The p5_period task is this same
+  // property with the assumption removed, and it FAILS.
+  always @* assume (cfg_period >= 16'd2);
+`endif
+  // The period is configuration: it is shifted in while the machine is held
+  // disabled and does not change under a running machine (section 2).
+  always @(posedge clk) if (f_past_valid) assume ($stable(cfg_period));
+
+`ifdef P5_LEMMA_ASSUME
+  // Compositional step. The whole difficulty in the counter proof is one
+  // arithmetic fact about 16-bit words -- that a half-period reload is never
+  // larger than a full one -- and bit-level PDR does not scale to it inside
+  // the counter's state space. It is proved on its own by the p5_lemma task,
+  // where it is stateless and immediate, and assumed here.
+  always @* assume (half_m1 <= period_m1);
+`endif
+`endif
+
+`ifdef P5_LEMMA
+  // The lemma itself: for P >= 2, thalf never reloads above trst. This is what
+  // p5_a and p5_b assume, and it is proved here with nothing assumed.
+  always @* assert (half_m1 <= period_m1);
+`endif
+
+`ifdef P5_A
+  // (a) the counter never exceeds P-1. This is what makes the period exact
+  //     rather than merely bounded, and it is the inductive core of (b).
+  always @(posedge clk) if (f_past_valid) assert (tcount <= period_m1);
+`endif
+
+`ifdef P5_B
+  // (b) between two consecutive ticks with no trst or thalf in between,
+  //     exactly P cycles elapse.
+  //
+  // Measured rather than restated: f_since counts cycles since the last tick
+  // and f_disturbed remembers whether a timer action landed since then, so
+  // the assertion compares an independently accumulated count against P-1
+  // instead of re-deriving it from tcount.
+  reg [TIMER_W-1:0] f_since;
+  reg               f_disturbed, f_seen_tick;
+  always @(posedge clk) begin
+    if (!rst_n || !en) begin
+      f_since     <= {TIMER_W{1'b0}};
+      f_disturbed <= 1'b0;
+      f_seen_tick <= 1'b0;
+    end else if (tick) begin
+      f_since     <= {TIMER_W{1'b0}};
+      f_disturbed <= fire & (act_trst | act_thalf);
+      f_seen_tick <= 1'b1;
+    end else begin
+      f_since     <= f_since + 1'b1;
+      if (fire & (act_trst | act_thalf)) f_disturbed <= 1'b1;
+    end
+  end
+
+  // The inductive form. "Exactly P cycles between ticks" is a claim about two
+  // points in time, which bit-level PDR cannot carry across a 16-bit counter
+  // on its own -- it has to discover the relation between f_since and tcount
+  // one bit at a time. Stated directly it is one-step inductive: the two move
+  // in opposite directions by one each cycle, so their sum is fixed at P-1
+  // for as long as nothing reloads the counter.
+  always @(posedge clk)
+    if (f_past_valid && rst_n && en && $past(en) && !f_disturbed)
+      assert (({1'b0, f_since} + {1'b0, tcount}) == {1'b0, period_m1});
+
+  // The property itself, which now follows in one step: at a tick tcount is
+  // zero, so f_since -- the cycles counted since the previous tick -- is P-1.
+  always @(posedge clk)
+    if (f_past_valid && rst_n && en && $past(en)
+        && tick && f_seen_tick && !f_disturbed)
+      assert (f_since == period_m1);
+`endif
+
+`ifdef P5_C
+  // (c) a timer action on a row whose test FAILED changes nothing: the
+  //     counter free-runs as if the action were absent.
+  always @(posedge clk) if (f_past_valid && rst_n && $past(rst_n) && $past(en)
+                            && !$past(test_pass)
+                            && ($past(act_trst) || $past(act_thalf))) begin
+    assert (tcount == ($past(tick) ? $past(period_m1)
+                                   : $past(tcount) - 1'b1));
+  end
+`endif
+
 
 `endif
 endmodule
