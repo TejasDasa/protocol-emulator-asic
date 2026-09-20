@@ -219,6 +219,62 @@ widths. Recorded in §16.1. An implementation must either bound the field or
 define what out-of-range means; this one does neither yet, and that is a
 decision for the design rather than something this document should invent.
 
+## P4 — FIFO state consistency
+
+**Stated in `docs/SPEC.md` §9, before the assertions were written:**
+
+> At every cycle the number of bytes a FIFO holds is between zero and its
+> depth. It reports `empty` exactly when it holds none and `full` exactly when
+> it holds `depth`, so it never reports both, and never reports room it does
+> not have or fullness it has not reached. A push onto a full FIFO and a pop
+> from an empty one leave the contents and the pointers alone and set only the
+> corresponding sticky flag, and neither flag clears except by reset.
+
+**Result: PROVED**, over every sequence of pushes and pops.
+
+| task | claim | result |
+|---|---|---|
+| `p4_a` | occupancy never exceeds the depth | PROVED |
+| `p4_b` | `empty` and `full` match occupancy exactly, in both directions | PROVED |
+| `p4_c` | overflow and underflow move no pointer and change no occupancy, and set their flag | PROVED |
+| `p4_d` | the sticky flags never clear | PROVED |
+
+The occupancy is not a signal in the design — the pointers are, and the extra
+pointer bit exists precisely so their difference is the occupancy. Computing it
+in the formal block is what lets the flags be checked against something other
+than themselves. `p4_b` is stated as equality rather than implication on
+purpose: a flag that is merely *conservative* — `full` asserted early, say —
+would satisfy "never reports not-full when full" and still be wrong, and
+equality catches it.
+
+**Negative tests — all FAIL as required:**
+
+| task | the break |
+|---|---|
+| `p4_break_full` | `full` computed without the wrap-bit check, the classic single-pointer-bit mistake, so an empty FIFO also reports full |
+| `p4_break_ovwr` | a push accepted when full, so the FIFO holds more than its depth and overwrites an unread entry |
+| `p4_break_sticky` | the overflow flag tracks the current cycle instead of latching, so a host polling a cycle late never learns a byte was lost |
+
+**Reproduce:**
+
+    cd rtl2/formal
+    for t in p4_a p4_b p4_c p4_d; do sby -f stt_fifo.sby $t; done
+    for t in p4_break_full p4_break_ovwr p4_break_sticky; do sby -f stt_fifo.sby $t; done
+
+### Why the state invariants are checked from the first clock edge
+
+`p4_a` and `p4_b` failed as first written, and again the design was right. They
+were combinational assertions, so they were also evaluated at time zero — before
+any clock edge, when `wptr` and `rptr` hold whatever the flops powered up with
+and no reset has run. An occupancy of 7 in a 4-deep FIFO is not a reachable
+state during operation; it is the absence of a state.
+
+They are now clocked and guarded on `f_past_valid`, so the first checked cycle
+is the one in which reset applied. This is not weakening: the evidence is that
+`p4_break_full` and `p4_break_ovwr` both still **fail**, and both are built on
+exactly these two assertions. A guard that had neutered them would have made
+those breaks pass, which is the case `run_formal.sh` exists to catch.
+
 ## Synthesis is unaffected
 
 All formal code is inside `` `ifdef FORMAL ``, which production synthesis never

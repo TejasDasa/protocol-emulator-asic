@@ -164,6 +164,15 @@ cases. Stalling is not available (§8.1: a row costs exactly one cycle and a
 machine never stalls), and dropping the **oldest** instead would silently corrupt
 an in-order byte stream.
 
+**SPECIFIED — what a FIFO reports always matches what it holds, and it is
+formally proved.** At every cycle the number of bytes a FIFO holds is between
+zero and its depth. It reports `empty` exactly when it holds none and `full`
+exactly when it holds `depth`, so it never reports both, and never reports room
+it does not have or fullness it has not reached. A push onto a full FIFO and a
+pop from an empty one leave the contents and the pointers alone and set only
+the corresponding sticky flag, and neither flag clears except by reset. Proved
+unbounded over every sequence of pushes and pops in `docs/formal.md` P4.
+
 Neither event is silent. Each FIFO sets a **sticky flag**, cleared only by reset,
 so a host can tell that a byte was lost rather than discovering it as corrupt
 protocol data.

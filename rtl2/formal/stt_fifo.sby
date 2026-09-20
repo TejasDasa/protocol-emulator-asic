@@ -1,0 +1,35 @@
+# FIFO state consistency. See docs/formal.md P4.
+[tasks]
+p4_a
+p4_b
+p4_c
+p4_d
+p4_break_full
+p4_break_ovwr
+p4_break_sticky
+
+[options]
+mode prove
+aigsmt none
+depth 20
+
+[engines]
+abc pdr
+
+[script]
+p4_a:            read -formal -DFORMAL -DP4_COMMON -DP4_A stt_fifo.v
+p4_b:            read -formal -DFORMAL -DP4_COMMON -DP4_B stt_fifo.v
+p4_c:            read -formal -DFORMAL -DP4_COMMON -DP4_C stt_fifo.v
+p4_d:            read -formal -DFORMAL -DP4_COMMON -DP4_D stt_fifo.v
+# Negative tests: each must FAIL.
+p4_break_full:   read -formal -DFORMAL -DP4_COMMON -DP4_A -DP4_B -DBREAK_P4A stt_fifo.v
+p4_break_ovwr:   read -formal -DFORMAL -DP4_COMMON -DP4_A -DP4_B -DBREAK_P4B stt_fifo.v
+p4_break_sticky: read -formal -DFORMAL -DP4_COMMON -DP4_D -DBREAK_P4C stt_fifo.v
+prep -top stt_fifo
+async2sync
+techmap
+setundef -undriven -anyseq
+opt -fast
+
+[files]
+../stt_fifo.v

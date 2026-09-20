@@ -15,3 +15,10 @@ stt_core:p3_c_break:fail:P3c negative -- write also clobbers slot 0
 stt_core:p3_d_break:fail:P3d negative -- d0 on a single slot writes
 stt_core:p3_e_break:fail:P3e negative -- sr updates without firing
 stt_core:p3_srwidth:fail:P3 without the sr_width precondition -- the SPEC 16.1 gap
+stt_fifo:p4_a:pass:P4a never holds more than its depth
+stt_fifo:p4_b:pass:P4b flags match occupancy exactly
+stt_fifo:p4_c:pass:P4c overflow and underflow are no-ops
+stt_fifo:p4_d:pass:P4d sticky flags never clear
+stt_fifo:p4_break_full:fail:P4 negative -- full without the wrap-bit check
+stt_fifo:p4_break_ovwr:fail:P4 negative -- push accepted when full
+stt_fifo:p4_break_sticky:fail:P4 negative -- overflow flag not sticky
