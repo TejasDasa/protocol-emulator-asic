@@ -213,10 +213,19 @@ mistake named, because the pattern matters more than the individual errors.
 | 8 | The slew and capacitance violations concentrate on the macro read path | Re-measuring on the current design | **A finding carried across a design change without re-measuring.** True on the superseded floorplan, 1-of-13 on the current one |
 | 9 | A CAN device model existed | Attempting to use it | **A file's existence taken for a working model.** `feed()` was never called and referenced an attribute that is never assigned |
 | 10 | Post-GRT repair improves timing | Comparing at the same flow stage | **Mid-flow metrics compared against post-route ones.** The repaired run's mid-PnR numbers are *identical* to the baseline's — 1.4535804082934107, 0, 128 — and both lose ~3.65 ns to extraction |
+| 11 | The gate-level simulation showed no inter-pin skew at all | Two independent sources disagreeing: 134 clock leaves reporting an identical 1000 ps arrival at *both* corners, against STA's 0.39–0.51 ns | **A tool silently quantizing away the quantity being measured.** Icarus rounds annotated SDF delays to the cell's time *unit* (1 ns), not its precision, so 0.250 ns annotates as 0 and 0.830 ns as 1 ns. A design whose skew is tens of picoseconds simulates as having none — and reports a clean zero rather than an error |
 
-Four of these ten are the same mistake: reading a signal without asking what
-the failing case does with that same signal. It is recorded here because
-naming it is what stopped the fifth.
+Four of these eleven are the same mistake: reading a signal without asking what
+the failing case does with that same signal. It is recorded here because naming
+it is what stopped the fifth — and the eleventh was caught the same way, by
+asking what a *second* source said about the same quantity.
+
+The eleventh is the one that would have done the most damage, because it does
+not produce an error or an implausible number. It produces **zero**, which is a
+clean-looking answer to "how much skew is there?". Unnoticed, the inter-pin
+skew measurement would have been a table of zeros and a false conclusion that
+the design has none. The rule it leaves behind: **when a measurement comes back
+zero, check that the instrument can represent a non-zero answer.**
 
 The one diagnostic that was correct throughout was printed by the PDN plugin on
 every affected run, in both row formats, and went unread:
