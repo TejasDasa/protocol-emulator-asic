@@ -42,6 +42,11 @@ module stt_imem #(
 );
 
   localparam integer BITC_W = $clog2(ROW_W);
+  // Sized here rather than with a `BITC_W'(...)` cast: a size cast is
+  // SystemVerilog only, and Vivado parses a .v file as Verilog-2001, where it
+  // is a syntax error. ROW_W-1 always fits in $clog2(ROW_W) bits, so this is
+  // the same value with the same width.
+  localparam [BITC_W-1:0] LAST_BIT = ROW_W - 1;
 
   reg [ROW_W-1:0] mem [0:ROWS-1];
   reg [ROW_W-1:0] stage;
@@ -49,7 +54,7 @@ module stt_imem #(
   reg [ADDR_W-1:0] wptr;
 
   wire [ROW_W-1:0] stage_next = {ld_in, stage[ROW_W-1:1]};
-  wire             last_bit   = (bitc == BITC_W'(ROW_W - 1));
+  wire             last_bit   = (bitc == LAST_BIT);
 
   integer i;
   always @(posedge clk or negedge rst_n) begin
