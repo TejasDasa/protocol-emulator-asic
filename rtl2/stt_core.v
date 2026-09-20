@@ -144,7 +144,15 @@ module stt_core #(
   wire act_loadcrc = (a_sr == `STT_ASR_LOADCRC);
   wire act_clr     = (a_sr == `STT_ASR_CLR) || (a_sr == `STT_ASR_CLR_SHIFT);
   wire act_shift   = (a_sr == `STT_ASR_SHIFT) || (a_sr == `STT_ASR_CLR_SHIFT);
+`ifdef BREAK_P2
+  // Negative test only: `push` also decoded from the combined clr+shift code,
+  // which is the shape a copy-paste of the act_clr/act_shift lines above would
+  // produce. One row then asserts push, clr and shift together.
+  wire act_push    = (a_sr == `STT_ASR_PUSH) || (a_sr == `STT_ASR_CLR_SHIFT);
+`else
   wire act_push    = (a_sr == `STT_ASR_PUSH);
+`endif
+
   wire act_cload   = (a_c1 == `STT_AC1_CLOAD);
   wire act_cload_b = (a_c1 == `STT_AC1_CLOAD_B);
   wire act_cload_c = (a_c1 == `STT_AC1_CLOAD_C);
@@ -598,6 +606,37 @@ module stt_core #(
     assert (row_next == link_next);
   always @* if (en && (f_mode == `STT_M_SKIP) && (f_tgt == `STT_RET) && test_pass)
     assert (row_next == f_next_seq);
+`endif
+
+`ifdef P2
+  // P2 -- action group mutual exclusion (SPEC section 6.1).
+  //
+  // Not a property of the encoder: a property of the decode, for every one of
+  // the 2^32 row words a host can load. What it really checks is that the
+  // generated constants in stt_isa.vh are distinct and that each flag's
+  // comparison names the right ones -- a duplicated code, or a stray extra
+  // term, makes two flags in a group fire at once and the if/else chains
+  // downstream then silently drop one action.
+  wire [3:0] f_n_sr = act_clr + act_load + act_loadcrc + act_loadk
+                    + act_push + act_shift;
+  wire [3:0] f_n_c1 = act_cload + act_cload_b + act_cload_c + act_cdec;
+  wire [3:0] f_n_c2 = act_c2load + act_c2dec;
+  wire [3:0] f_n_tm = act_trst + act_thalf;
+  wire [3:0] f_n_xx = act_call + act_crcrst + act_crcstep
+                    + act_crc16rst + act_crc16step + act_stuffrst;
+
+  // at most one, except {clr, shift} may appear together
+  always @* assert (f_n_sr <= 4'd1 || (act_clr && act_shift && f_n_sr == 4'd2));
+  always @* assert (f_n_c1 <= 4'd1);
+  always @* assert (f_n_c2 <= 4'd1);
+  always @* assert (f_n_tm <= 4'd1);
+  // at most one, except {crcrst, call} may appear together
+  always @* assert (f_n_xx <= 4'd1 || (act_crcrst && act_call && f_n_xx == 4'd2));
+
+  // Stated on its own because the datapath depends on this one specifically:
+  // rx_data is sr_mid, the value before any shift, which is only the right
+  // thing to push because a row cannot both push and shift.
+  always @* assert (!(act_push && act_shift));
 `endif
 
 `endif

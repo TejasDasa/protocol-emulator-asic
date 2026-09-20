@@ -5,6 +5,7 @@ p1
 p1_break_ret
 p1_break_skip
 p2
+p2_break
 p3
 p5
 
@@ -26,7 +27,8 @@ p1: read -formal -DFORMAL -DP1 stt_core.v
 # check that passed while the PDN was disconnected).
 p1_break_ret:  read -formal -DFORMAL -DP1 -DBREAK_P1  stt_core.v
 p1_break_skip: read -formal -DFORMAL -DP1 -DBREAK_P1B stt_core.v
-p2: read -formal -DFORMAL -DP2 stt_core.v
+p2:       read -formal -DFORMAL -DP2 stt_core.v
+p2_break: read -formal -DFORMAL -DP2 -DBREAK_P2 stt_core.v
 p3: read -formal -DFORMAL -DP3 stt_core.v
 p5: read -formal -DFORMAL -DP5 stt_core.v
 prep -top stt_core

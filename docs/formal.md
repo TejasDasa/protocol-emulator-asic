@@ -98,6 +98,46 @@ target, so only a host writing raw row words can reach one, and no test in the
 repo covered the region until P1 quantified over it. It is now recorded in
 §16.1 as an implementation choice rather than left as a silent one.
 
+## P2 — action group mutual exclusion
+
+**Stated in `docs/SPEC.md` §6.1, which already carried the rule; the sentence
+added is the hardware reading of it:**
+
+> For **every** 32-bit row word, including words no encoder would ever emit,
+> the action flags a row decodes to satisfy every rule in the §6.1 table — at
+> most one per group, with exactly the two exceptions named, `{clr, shift}` and
+> `{crcrst, call}`.
+
+**Result: PROVED**, over all 2^32 row values.
+
+Worth being precise about what this does and does not establish. Mutual
+exclusion *between* groups is structural: the groups are separate bit fields,
+so nothing could make `sr` and `c1` collide. What the proof actually checks is
+*within* a group, and there the content is real — each flag is a comparison
+against a constant from the generated `stt_isa.vh`, so the property holds only
+if those constants are distinct and each flag names the right ones. A
+duplicated code out of `gen_isa_vh.py`, or a stray extra term in a comparison,
+makes two flags in one group fire together, and the `if / else if` chains
+downstream then silently drop one of the two actions rather than failing.
+
+One assertion is stated separately because the datapath depends on it
+specifically rather than on the group rule in general: `rx_data` is `sr_mid`,
+the shift register before any shift, which is only the right value to `push`
+because a row cannot both push and shift. That is an assumption written in a
+comment in `stt_core.v`; it is now proved.
+
+**Negative test — FAILS as required:**
+
+| task | the break |
+|---|---|
+| `p2_break` | `act_push` also decoded from the combined `clr+shift` code. This is the shape a copy-paste of the adjacent `act_clr` / `act_shift` lines would produce — both of those legitimately match two codes — so one row then asserts `push`, `clr` and `shift` together |
+
+**Reproduce:**
+
+    cd rtl2/formal
+    sby -f stt_core.sby p2          # PASS
+    sby -f stt_core.sby p2_break    # FAIL, as required
+
 ## Synthesis is unaffected
 
 All formal code is inside `` `ifdef FORMAL ``, which production synthesis never

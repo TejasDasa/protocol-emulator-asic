@@ -409,6 +409,17 @@ Every code in that count is implemented: the wider shared units of §9 are live,
 
 <!-- END GENERATED: action-rule -->
 
+**SPECIFIED — the hardware enforces this, and it is formally proved.** The
+rules above are stated for the implementer choosing an encoding. Read as a
+property of the hardware they are stronger: for **every** 32-bit row word,
+including words no encoder would ever emit, the action flags a row decodes to
+satisfy every rule in the table — at most one per group, with exactly the two
+exceptions named, `{clr, shift}` and `{crcrst, call}`. The datapath depends on
+this and not only on the encoder honouring it: `push` writes the shift register
+as it stands before any shift, which is only well defined because `push` and
+`shift` cannot both be asserted by one row. Proved over all 2^32 row values,
+unbounded, in `docs/formal.md` P2.
+
 ### 6.2 What a program does when it needs a forbidden set
 
 **SPECIFIED.** A set that violates any rule in §6.1 cannot be encoded in one

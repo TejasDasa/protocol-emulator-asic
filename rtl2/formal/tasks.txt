@@ -3,3 +3,5 @@
 stt_core:p1:pass:P1 branch resolver agrees with SPEC 5 for every input
 stt_core:p1_break_ret:fail:P1 negative -- RET on the true exit only
 stt_core:p1_break_skip:fail:P1 negative -- SKIP exits swapped
+stt_core:p2:pass:P2 action groups mutually exclusive for every row word
+stt_core:p2_break:fail:P2 negative -- push also decoded from the clr+shift code
