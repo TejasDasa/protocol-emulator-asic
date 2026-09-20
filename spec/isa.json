@@ -199,15 +199,24 @@
     {"name": "pinv",   "width": 3,  "reset": "configured init_pins", "scope": "per-SM", "description": "Output slot values, one bit per slot."}
   ],
 
+  "config_units": [
+    {"name": "crc16_poly",      "description": "Polynomial for the wide CRC/LFSR.", "range": "0-65535. Any polynomial."},
+    {"name": "crc16_width",     "description": "Width of the wide CRC register, in bits.", "range": "1-16. Outside that the register mask and the feedback tap disagree; the result is defined but meaningless."},
+    {"name": "crc16_reflect",   "description": "Reflected (shift right, feed back from bit 0) or MSB-first.", "range": "Both values valid."},
+    {"name": "crc16_seed_ones", "description": "Seed the CRC with all ones rather than zeros.", "range": "Both values valid."},
+    {"name": "stuff_n",         "description": "Run length that forces a stuffed bit. 0 disables the stuffer.", "range": "0-15. All values defined; 0 disables."},
+    {"name": "stuff_ones",      "description": "Count runs of 1s only (USB, HDLC) rather than any identical run (CAN).", "range": "Both values valid."},
+    {"name": "stuff_slots",     "description": "Which output slots route through the stuffer.", "range": "One bit per slot; all values valid."}
+  ],
   "config": [
-    {"name": "P",          "description": "Timer reload period, in core clock cycles.", "used_by": ["tmr", "trst", "thalf"]},
-    {"name": "shift",      "description": "Shift direction, left or right. Selects which end of the shift register is the serial bit.", "used_by": ["shift", "srbit"]},
-    {"name": "fill",       "description": "Fill bit source for shift: constant 0, constant 1, or synchronized input 0.", "used_by": ["shift"]},
-    {"name": "sr_width",   "description": "Shift register width.", "used_by": ["shift", "srbit", "load", "loadk", "clr"]},
-    {"name": "cload_abc",  "description": "The three counter 1 reload constants.", "used_by": ["cload", "cload_b", "cload_c"]},
-    {"name": "c2load_val", "description": "Counter 2 reload constant.", "used_by": ["c2load"]},
-    {"name": "loadk",      "description": "The constant K loaded by loadk.", "used_by": ["loadk"]},
-    {"name": "init_pins",  "description": "Reset value of each output slot.", "used_by": []},
-    {"name": "slot_modes", "description": "Per slot: push-pull or open-drain. In open-drain a 1 releases the net and a 0 drives it low.", "used_by": []}
+    {"name": "P",          "description": "Timer reload period, in core clock cycles.", "range": "1-65535. A program that uses `thalf` needs `P >= 2`: `thalf` reloads to `P/2-1`, which underflows to 65535 at `P = 1`.", "used_by": ["tmr", "trst", "thalf"]},
+    {"name": "shift",      "description": "Shift direction, left or right. Selects which end of the shift register is the serial bit.", "range": "Both values valid.", "used_by": ["shift", "srbit"]},
+    {"name": "fill",       "description": "Fill bit source for shift: constant 0, constant 1, or synchronized input 0.", "range": "0, 1 or in0. The fourth encoding of the 2-bit field is UNASSIGNED and silently behaves as in0.", "used_by": ["shift"]},
+    {"name": "sr_width",   "description": "Shift register width.", "range": "1-8. Outside that the serial bit is an out-of-range select of an 8-bit register: UNDEFINED, and it reaches a pin.", "used_by": ["shift", "srbit", "load", "loadk", "clr"]},
+    {"name": "cload_abc",  "description": "The three counter 1 reload constants.", "range": "0-255 each.", "used_by": ["cload", "cload_b", "cload_c"]},
+    {"name": "c2load_val", "description": "Counter 2 reload constant.", "range": "0-255.", "used_by": ["c2load"]},
+    {"name": "loadk",      "description": "The constant K loaded by loadk.", "range": "0-255. Masked to `sr_width` when loaded.", "used_by": ["loadk"]},
+    {"name": "init_pins",  "description": "Reset value of each output slot.", "range": "One bit per slot; all values valid.", "used_by": []},
+    {"name": "slot_modes", "description": "Per slot: push-pull or open-drain. In open-drain a 1 releases the net and a 0 drives it low.", "range": "One bit per slot; all values valid.", "used_by": []}
   ]
 }

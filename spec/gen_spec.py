@@ -113,10 +113,18 @@ def blocks(spec):
     )
 
     b["config"] = table(
-        ["item", "description", "used by"],
-        [[f"`{c['name']}`", c["description"],
+        ["item", "description", "valid range", "used by"],
+        [[f"`{c['name']}`", c["description"], c["range"],
           ", ".join(f"`{u}`" for u in c["used_by"]) if c["used_by"] else "—"]
          for c in spec["config"]]
+    )
+
+    # The section 9 unit configuration had no table at all, which is part of
+    # why its ranges went unstated for as long as the rest.
+    b["config-units"] = table(
+        ["item", "description", "valid range"],
+        [[f"`{c['name']}`", c["description"], c["range"]]
+         for c in spec["config_units"]]
     )
 
     b["action-order"] = ("Within a row, actions take effect in this fixed order:\n\n"

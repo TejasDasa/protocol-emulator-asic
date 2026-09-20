@@ -191,6 +191,7 @@ check: spec-check
 	@$(MAKE) --no-print-directory check-can
 	@$(MAKE) --no-print-directory check-pinmap
 	@$(MAKE) --no-print-directory check-phase
+	@$(MAKE) --no-print-directory check-config
 	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
 	@for r in $(COMB_RUNS); do \
 	   test -f $(BUILD)/$$r.log && python3 scripts/check_area.py $(BUILD)/$$r.log --comb-ok || true; \
@@ -198,6 +199,15 @@ check: spec-check
 	@python3 scripts/check_slope.py $(BUILD)
 	@$(MAKE) --no-print-directory formal
 	@$(MAKE) --no-print-directory check-mutation
+
+# Every configuration field has a stated range (SPEC sections 2 and 9). Four of
+# the sixteen had none until formal verification needed a precondition on one
+# and a sweep found the rest. Hardware stays permissive -- there is no trap,
+# and adding one costs rows and area for a case no program reaches -- so the
+# encoder is where the range is enforced. Checked in both directions.
+.PHONY: check-config
+check-config:
+	@cd isa_bench && python3 config_check.py
 
 # Mutation score is a validity gate, not a report: if it falls, the benchmarks
 # got weaker. That is how the SPI/I2C timing gap survived unnoticed.

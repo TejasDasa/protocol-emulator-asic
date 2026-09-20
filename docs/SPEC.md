@@ -96,17 +96,17 @@ encoded in rows:
 <!-- BEGIN GENERATED: config -->
 <!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
 
-| item         | description                                                                                  | used by                                  |
-|--------------|----------------------------------------------------------------------------------------------|------------------------------------------|
-| `P`          | Timer reload period, in core clock cycles.                                                   | `tmr`, `trst`, `thalf`                   |
-| `shift`      | Shift direction, left or right. Selects which end of the shift register is the serial bit.   | `shift`, `srbit`                         |
-| `fill`       | Fill bit source for shift: constant 0, constant 1, or synchronized input 0.                  | `shift`                                  |
-| `sr_width`   | Shift register width.                                                                        | `shift`, `srbit`, `load`, `loadk`, `clr` |
-| `cload_abc`  | The three counter 1 reload constants.                                                        | `cload`, `cload_b`, `cload_c`            |
-| `c2load_val` | Counter 2 reload constant.                                                                   | `c2load`                                 |
-| `loadk`      | The constant K loaded by loadk.                                                              | `loadk`                                  |
-| `init_pins`  | Reset value of each output slot.                                                             | —                                        |
-| `slot_modes` | Per slot: push-pull or open-drain. In open-drain a 1 releases the net and a 0 drives it low. | —                                        |
+| item         | description                                                                                  | valid range                                                                                                            | used by                                  |
+|--------------|----------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|------------------------------------------|
+| `P`          | Timer reload period, in core clock cycles.                                                   | 1-65535. A program that uses `thalf` needs `P >= 2`: `thalf` reloads to `P/2-1`, which underflows to 65535 at `P = 1`. | `tmr`, `trst`, `thalf`                   |
+| `shift`      | Shift direction, left or right. Selects which end of the shift register is the serial bit.   | Both values valid.                                                                                                     | `shift`, `srbit`                         |
+| `fill`       | Fill bit source for shift: constant 0, constant 1, or synchronized input 0.                  | 0, 1 or in0. The fourth encoding of the 2-bit field is UNASSIGNED and silently behaves as in0.                         | `shift`                                  |
+| `sr_width`   | Shift register width.                                                                        | 1-8. Outside that the serial bit is an out-of-range select of an 8-bit register: UNDEFINED, and it reaches a pin.      | `shift`, `srbit`, `load`, `loadk`, `clr` |
+| `cload_abc`  | The three counter 1 reload constants.                                                        | 0-255 each.                                                                                                            | `cload`, `cload_b`, `cload_c`            |
+| `c2load_val` | Counter 2 reload constant.                                                                   | 0-255.                                                                                                                 | `c2load`                                 |
+| `loadk`      | The constant K loaded by loadk.                                                              | 0-255. Masked to `sr_width` when loaded.                                                                               | `loadk`                                  |
+| `init_pins`  | Reset value of each output slot.                                                             | One bit per slot; all values valid.                                                                                    | —                                        |
+| `slot_modes` | Per slot: push-pull or open-drain. In open-drain a 1 releases the net and a 0 drives it low. | One bit per slot; all values valid.                                                                                    | —                                        |
 
 <!-- END GENERATED: config -->
 
@@ -750,6 +750,27 @@ single run counter cannot serve it.
 The cost is real and is charged per machine: 22 flops of state in `stt_core`
 (16 of CRC, 6 of stuffer) and 31 in `stt_config` for the polynomial, width,
 direction, seed, threshold and slot routing.
+
+**SPECIFIED — the unit configuration, and what each field may hold.** These are
+per-machine configuration set at program load, exactly like §2's list, and they
+are shifted in through the same register. Their ranges are stated here for the
+reason §16.1 records: the ones that had no stated range were the ones where an
+out-of-range value did something the specification never described.
+
+<!-- BEGIN GENERATED: config-units -->
+<!-- generated from spec/isa.json by spec/gen_spec.py -- do not edit by hand -->
+
+| item              | description                                                            | valid range                                                                                                |
+|-------------------|------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
+| `crc16_poly`      | Polynomial for the wide CRC/LFSR.                                      | 0-65535. Any polynomial.                                                                                   |
+| `crc16_width`     | Width of the wide CRC register, in bits.                               | 1-16. Outside that the register mask and the feedback tap disagree; the result is defined but meaningless. |
+| `crc16_reflect`   | Reflected (shift right, feed back from bit 0) or MSB-first.            | Both values valid.                                                                                         |
+| `crc16_seed_ones` | Seed the CRC with all ones rather than zeros.                          | Both values valid.                                                                                         |
+| `stuff_n`         | Run length that forces a stuffed bit. 0 disables the stuffer.          | 0-15. All values defined; 0 disables.                                                                      |
+| `stuff_ones`      | Count runs of 1s only (USB, HDLC) rather than any identical run (CAN). | Both values valid.                                                                                         |
+| `stuff_slots`     | Which output slots route through the stuffer.                          | One bit per slot; all values valid.                                                                        |
+
+<!-- END GENERATED: config-units -->
 
 **Context — the four blocks in `rtl/`.** `rtl/` also contains a 16-bit
 programmable-polynomial CRC/LFSR (`crc_lfsr16.v`), a configurable bit stuffer
@@ -1433,8 +1454,7 @@ and where the evidence stops.
 |---|---|---|
 | **Timer width** | `tcount` is an unbounded integer in the models. The structural RTL uses 16 bits. Must cover the required reload period `P`. | §2, §8.4 |
 | **Test codes 11–15** | Unassigned. The models would raise on decode. Code 10 and pin op code 7 are now implemented (§9). | §4, §7 |
-| **`P` below 2** | Neither §2 nor §8.4 gives the timer period a range, and nothing constrains the 16-bit field a host loads. `P = 0` makes "reload to `P−1`" meaningless: the counter reloads to 65535 and `tmr` is true once in 65536 cycles, not once in `P`. `P = 1` is coherent while free-running — `tmr` every cycle — but `thalf` reloads to `P/2−1`, which underflows to 65535 and strands the timer for 65536 cycles. Found by `docs/formal.md` P5, which cannot prove the free-running rule without assuming `P ≥ 2`. | §2, §8.4 |
-| **`sr_width` outside 1–8** | §2 names `sr_width` but gives it no range, and nothing constrains the 4-bit configuration field a host loads. The shift register is 8 bits, so a width of 0 or 9–15 makes the `srbit` test and the `sr` pin op read bit 15 or bits 8–14 of an 8-bit register: an out-of-range select, which is undefined, and it reaches a pin. Found by `docs/formal.md` P3, which cannot prove decode totality without assuming the range. An implementation must either bound the field or define what out-of-range means; this one does neither yet. | §2, §7 |
+| **Configuration outside its stated range** | §2 and §9 now give every configuration field a valid range, and `isa_bench/config_check.py` rejects anything outside it at construction. Hardware does **not** trap, and that is the choice being recorded: out of range, `sr_width` selects a bit of the shift register that does not exist and the undefined value reaches a pin; `P = 1` with a `thalf` reloads 65535 and strands the timer; `fill`'s fourth code silently behaves as in0; `crc16_width` outside 1-16 leaves the register mask and the feedback tap disagreeing. A trap would cost rows and area for a case no program reaches, so the encoder is where this is caught. Four of the sixteen fields had no stated range until `docs/formal.md` P3 and P5 each needed a precondition to prove anything and `rtl2/formal/config_sweep.v` swept the rest. | §2, §9 |
 | **Target values 32–254** | §5 says the target field addresses rows with 255 reserved for return, but only rows 0–31 exist (§12), so targets 32–254 name no row and §5 does not say what they mean. Found while stating §5 precisely enough to prove it. This implementation takes the low 5 bits, so target 40 addresses row 8; `rowenc` never emits such a target, so only a host writing raw row words can reach one, and no test covered the region before `docs/formal.md` P1 quantified over it. | §5, §12 |
 | **A 33rd row in hardware** | The toolchain rejects it. The structural RTL's 5-bit write pointer wraps and overwrites row 0. | §12 |
 | **Live reprogramming** | §11.1 specifies that the `run` flag is cleared only by `rst_n`, so reprogramming means asserting reset. What a machine does on the first cycle after a reload short of reset is still undefined. | §10, §11.1 |

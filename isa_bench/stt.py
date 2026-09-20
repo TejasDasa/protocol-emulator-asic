@@ -87,6 +87,83 @@ class SttProgram:
         return len(self.rows) * WIDTH[version]
 
 
+# Configuration ranges, from docs/SPEC.md section 2 and section 9.
+#
+# Every one of these was unstated until docs/formal.md P3 and P5 each needed a
+# precondition on a configuration field to prove anything, and a sweep of all
+# sixteen fields (rtl2/formal/config_sweep.v) found four with a range the
+# specification never gave. Hardware stays permissive -- there is no trap, and
+# adding one costs rows and area for a case no program hits. The encoder is
+# where the range is enforced, the same division SttProgram already uses for
+# d0/d1 on a single slot and for a program over 32 rows.
+CFG_RANGES = {
+    "period":      (1, 0xFFFF),
+    "sr_width":    (1, 8),
+    "crc16_poly":  (0, 0xFFFF),
+    "crc16_width": (1, 16),
+    "stuff_n":     (0, 15),
+    "c2load":      (0, 0xFF),
+    "loadk":       (0, 0xFF),
+}
+FILL_VALUES  = ("0", "1", "in0")
+SHIFT_VALUES = ("left", "right")
+
+
+def _rng(name, value):
+    lo, hi = CFG_RANGES[name]
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{name} must be an int, got {value!r}")
+    if not lo <= value <= hi:
+        raise ValueError(
+            f"{name}={value} is outside {lo}-{hi} (docs/SPEC.md section 2)")
+
+
+def _check_config(*, prog, slots, period, shift, fill, sr_width, cload,
+                  c2load, loadk, init_pins, crc16_poly, crc16_width,
+                  stuff_n, stuff_slots):
+    _rng("period", period)
+    _rng("sr_width", sr_width)
+    _rng("c2load", c2load)
+    _rng("loadk", loadk)
+    _rng("crc16_poly", crc16_poly)
+    _rng("crc16_width", crc16_width)
+    _rng("stuff_n", stuff_n)
+
+    if shift not in SHIFT_VALUES:
+        raise ValueError(f"shift={shift!r} must be one of {SHIFT_VALUES}")
+    if fill not in FILL_VALUES:
+        raise ValueError(f"fill={fill!r} must be one of {FILL_VALUES}")
+
+    # thalf reloads to P/2-1, which underflows at P=1. Only a program that
+    # actually uses thalf is affected, so the check is on the program rather
+    # than a blanket P >= 2 that would reject working single-cycle timers.
+    if period < 2 and any("thalf" in r.act for r in getattr(prog, "rows", ())):
+        raise ValueError(
+            f"period={period} with a `thalf` action: thalf reloads to P/2-1, "
+            "which underflows (docs/SPEC.md section 8.4)")
+
+    if len(cload) != 3:
+        raise ValueError(f"cload must be three constants, got {cload!r}")
+    for i, v in enumerate(cload):
+        if not 0 <= v <= 0xFF:
+            raise ValueError(f"cload[{i}]={v} is outside 0-255")
+
+    for i, (_net, mode) in enumerate(slots):
+        if mode not in ("pp", "od"):
+            raise ValueError(f"slot {i} mode {mode!r} must be 'pp' or 'od'")
+    if init_pins is not None:
+        if len(init_pins) != len(slots):
+            raise ValueError(
+                f"init_pins has {len(init_pins)} entries for {len(slots)} slots")
+        for i, b in enumerate(init_pins):
+            if b not in (0, 1, True, False):
+                raise ValueError(f"init_pins[{i}]={b!r} must be 0 or 1")
+    for i in stuff_slots:
+        if not 0 <= i < len(slots):
+            raise ValueError(
+                f"stuff_slots names slot {i}, but there are {len(slots)} slots")
+
+
 class SttCore:
     def __init__(self, prog, *, slots, ins=(), period, shift="right", fill="0",
                  sr_width=8, cload=(8, 0, 0), c2load=0, loadk=0, init_pins=None,
@@ -94,6 +171,11 @@ class SttCore:
                  crc16_seed_ones=False, stuff_n=0, stuff_ones=False,
                  stuff_slots=()):
         """slots: list of (net, mode) with mode 'pp' or 'od'. ins: nets for in0, in1."""
+        _check_config(
+            prog=prog, slots=slots, period=period, shift=shift, fill=fill,
+            sr_width=sr_width, cload=cload, c2load=c2load, loadk=loadk,
+            init_pins=init_pins, crc16_poly=crc16_poly,
+            crc16_width=crc16_width, stuff_n=stuff_n, stuff_slots=stuff_slots)
         self.p = prog
         self.slots, self.ins = slots, list(ins)
         self.P = period

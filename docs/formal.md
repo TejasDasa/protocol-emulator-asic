@@ -29,24 +29,28 @@ that was supposed to fail.
 
 ### Spec gaps the exercise exposed
 
-Three, two of them the same kind, and all found by the act of stating a property
-precisely enough to assert it rather than by any proof failing:
+Five. Three were found by stating a property precisely enough to assert it, and
+the two after them by the sweep those three provoked:
 
 | gap | what was missing | now in |
 |---|---|---|
 | **target values 32–254** | §5 said the target field addresses rows, but only rows 0–31 exist, so 32–254 named nothing and the spec did not say what they meant | §16.1 |
 | **`sr_width` outside 1–8** | §2 names the field and gives it no range; out of range it reads a bit of the shift register that does not exist, and the undefined value reaches a pin | §16.1 |
 | **`P` below 2** | §8.4 gives the period no range; at `P = 1` a `thalf` reload underflows to 65535 and strands the timer | §16.1 |
+| **`fill` code 3** | a 2-bit field with three assigned values; the fourth is unassigned and silently behaves as in0 | §2 |
+| **`crc16_width` outside 1-16** | §9 gives it no range; outside it the register mask and the feedback tap disagree | §9 |
 
-Two of these are the same shape: **every configuration field this exercise
-looked at had a range the spec never stated and the hardware never enforces.**
-Two of the two examined. A small sample, but not a coincidence — §9's
-`crc16_width` and `stuff_n` are the obvious next ones to check, and they have
-not been.
+Four of the five are the same shape: a configuration field with no stated range,
+where an out-of-range value does something the specification never described.
+Two of the two examined at the time — which was reason enough to stop
+discovering them one at a time and check the rest in one pass. That sweep is
+below, and it found two more.
 
-None of the three is a bug in the sense of a program behaving wrongly. All
-three are regions no encoder emits and no test in the repo reaches, which is
-exactly why quantifying over the input space found them and sampling did not.
+None of the five is a bug in the sense of a program behaving wrongly. All five
+are regions no encoder emits and no test in the repo reaches, which is exactly
+why quantifying over the input space found them and sampling did not. All five
+are now closed: the range is stated in the specification, generated from
+`spec/isa.json`, and the encoder rejects anything outside it at construction.
 
 ## How to read a result
 
@@ -403,11 +407,67 @@ timer period a range, and nothing constrains the 16-bit field a host loads.
 
 `p5_period` is `p5_a` with the precondition removed. It **FAILS**. Recorded in
 §16.1, alongside the `sr_width` gap P3 found — the same shape twice, and the
-pattern is worth naming: **every configuration field this exercise looked at
-turned out to have a range the spec never stated and the hardware never
-enforces.** Two of the two examined. That is a small sample, but it is not a
-coincidence, and §9's `crc16_width` and `stuff_n` are the obvious next ones to
-check.
+pattern is worth naming: **every configuration field this exercise had looked
+at turned out to have a range the spec never stated and the hardware never
+enforces.** Two of two was reason enough to stop finding them one at a time;
+the sweep of all sixteen is below, and it found two more.
+
+## The configuration sweep
+
+P3 and P5 each needed a precondition on a configuration field to prove
+anything, and both fields turned out to have no range stated anywhere. Two of
+two is a pattern rather than two accidents, so the remaining fourteen were
+checked in one pass instead of one at a time.
+
+`rtl2/formal/config_sweep.v` holds every field at a known-good value, sweeps
+one field across **every value its hardware field can hold**, runs a row that
+exercises it, and watches for an undefined value reaching a pin or an
+architectural register. §2's nine items and §9's seven are all covered.
+
+    cd rtl2 && iverilog -g2012 -I . -o /tmp/sweep.out formal/config_sweep.v stt_core.v && /tmp/sweep.out
+
+**Four of the sixteen had no stated range. Twelve were already total.**
+
+| field | encodable | legal | what happens outside it |
+|---|---|---|---|
+| `sr_width` | 0–15 | **1–8** | **UNDEFINED.** `sr_width = 0` and `9–15` select a bit of an 8-bit register that does not exist, and the value reaches a pin |
+| `P` | 0–65535 | **1–65535**, and ≥ 2 with `thalf` | `P = 0`: 0 ticks in 200 cycles. `P = 1` with a `thalf` on every passing row: largest `tcount` reached **65535**, 0 ticks in 300 cycles — the reload overshoots `P−1` and strands the timer |
+| `fill` | 0–3 | **0–2** | Code 3 is unassigned and silently behaves as in0. Defined, but it is a fourth meaning for a three-valued field |
+| `crc16_width` | 0–31 | **1–16** | Defined, never undefined — but outside 1–16 the register mask and the feedback tap disagree, so the CRC is a well-defined function of nothing in particular |
+| the other twelve | — | every value | Nothing. `shift`, `stuff_ones`, `crc16_reflect`, `crc16_seed_ones` are booleans; `cload_abc`, `c2load_val`, `loadk`, `crc16_poly` accept their full width; `init_pins`, `slot_modes`, `stuff_slots` are one bit per slot; `stuff_n` is total, with 0 disabling the stuffer |
+
+Being exact about the difference matters: only `sr_width` is *undefined*. `P`
+outside its range is well defined and useless, `fill = 3` is well defined and
+undocumented, and `crc16_width` outside 1–16 is well defined and meaningless.
+Calling all four "undefined" would have been the easier sentence and the wrong
+one.
+
+### What was done about it
+
+Every one of the sixteen fields now carries a **valid range** in §2 and §9,
+generated from `spec/isa.json` like the rest of those tables, so a range and
+the field it describes cannot drift apart.
+
+Enforcement is in the encoder, not the hardware. `SttCore` rejects
+out-of-range configuration at construction, the way `SttProgram` already
+rejects `d0`/`d1` on a single slot and a program over 32 rows.
+`isa_bench/config_check.py` (`make check-config`, inside `make check`) checks
+it in both directions: every rejection must fire, every edge of every range
+must be accepted, and every reference program must still build.
+
+Hardware stays permissive and that is deliberate, not an omission — it is
+recorded as a choice in §16.1. A trap needs architectural state the ISA has
+nowhere to put, and would cost rows and area to catch a case no program
+reaches.
+
+### One instrument correction
+
+The sweep first reported **every** configuration undefined, including known-good
+ones. `$isunknown` applied to a concatenation of the watched signals returned
+true while `$isunknown` on each signal individually returned false. The check
+is now per signal. Worth recording only because the failure mode was the useful
+kind — an instrument that says everything is broken is noticed immediately,
+unlike one that says everything is fine.
 
 ## Synthesis is unaffected
 

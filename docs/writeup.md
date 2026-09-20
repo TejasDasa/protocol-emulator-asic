@@ -212,7 +212,7 @@ repo has already shipped one such gate.
 
 ### 4.3 What verification found, and the failure modes behind it
 
-Fourteen wrong conclusions were caught by measurement. Each is recorded with the
+Sixteen wrong conclusions were caught by measurement. Each is recorded with the
 mistake named, because the pattern matters more than the individual errors.
 
 | # | The wrong conclusion | How it was caught | Failure mode |
@@ -232,7 +232,9 @@ mistake named, because the pattern matters more than the individual errors.
 | 13 | The machines never drive pins at gate level, so the gate-level flow is what is broken | Running the same testbench against behavioural RTL, where it failed identically in 30 seconds | **A symptom blamed on the newest thing in the stack, without checking the oldest.** The gate netlist, the SDF and the annotation were all new, so all three were suspected for days. The bug was in the testbench and present everywhere: `test_skew` reimplemented the instruction-shift loop instead of importing the shared one, and left out the settle past the clock edge, so it read `imem_ld_busy` as it was BEFORE the edge. A busy that had just gone high read as idle, the next bit went into a busy memory, and exactly one bit was lost at every 32-bit word boundary — word N came back as word N shifted right by N. Row 0 survived, so the machine started, consumed a byte and pulled CS low before executing a garbage row 1 that branched to 0 and stopped, which is why it looked alive |
 | 14 | Skew is 1.88 ns at the typical corner and 0.68 ns at the slow one | Simulating it: 0.451 ns typical, 0.707 ns slow | **A number that was physically backwards and went unchallenged because nothing depended on it.** Skew here is the difference of two delays, so it must shrink as the corner gets faster; a typical corner worse than the slow one describes no chip. It was printed in bold as the headline figure. Every pair passed by two to three orders of magnitude either way, and that margin is exactly what kept the error invisible — no downstream conclusion was sensitive enough to it to fail |
 
-Four of these fourteen are the same mistake: reading a signal without asking what
+| 15 | Five properties of the timer are proved | All three deliberate breaks passing as well | **A property that compiled to nothing.** The P5 block had been inserted inside another property's `ifdef`, so the timer tasks defined no assertions at all and every one passed -- including the three breaks written to make them fail. Nothing in the output distinguished this from a real proof. It is the second gate in this project that could not fail, after the macro-power check that passed while the PDN was disconnected, and the second caught only by deliberately breaking it |
+| 16 | A formal property failing means the design is wrong | Splitting each property into one task per claim, so the failure named which claim rather than requiring a counterexample | **An assertion wrong before the design was.** Three times. `p3_e` guarded on the current cycle's `en` and `test_pass` while `$stable` compares against the previous cycle, whose row decided the change. `p4_a` and `p4_b` were combinational, so they were also evaluated at time zero, before any clock edge, when the FIFO pointers hold whatever the flops powered up with -- an occupancy of 7 in a 4-deep FIFO is not a reachable state but the absence of one. And `$isunknown` over a concatenation reported unknown while every signal in it was known, which marked every configuration undefined until the check was done per signal. Same category as the thirteenth: the instrument wrong rather than the thing measured |
+Four of these sixteen are the same mistake: reading a signal without asking what
 the failing case does with that same signal. It is recorded here because naming
 it is what stopped the fifth — and the eleventh was caught the same way, by
 asking what a *second* source said about the same quantity.
@@ -278,6 +280,22 @@ every pair passed by two to three orders of magnitude, so no downstream
 conclusion was sensitive enough to the number to fail when it was wrong. A
 margin large enough to make a result safe is also large enough to stop
 anything from checking it.
+
+The fifteenth is the one worth building a habit around, because the output of
+a vacuous proof is indistinguishable from the output of a real one. Thirty-two
+tasks reported what they were supposed to report; five of them were checking
+nothing, and the only reason anyone found out is that the deliberate breaks
+were run too and passed. A proof that cannot fail is not weak evidence, it is
+no evidence, and it looks exactly like strong evidence. The rule it leaves
+behind: **ship the break with the property, and run it.**
+
+The sixteenth is its mirror. When a property does fail, the first suspect is
+the assertion rather than the design -- three of the four failures in this work
+were mine. What made that cheap to establish was splitting each property into
+one task per claim: with no SMT solver in the toolchain there are no
+counterexample waveforms, so the only diagnostic available is *which* claim
+broke, and that only exists if the claims are separate tasks. Granularity
+bought the diagnosis that tooling could not.
 
 The one diagnostic that was correct throughout was printed by the PDN plugin on
 every affected run, in both row formats, and went unread:
