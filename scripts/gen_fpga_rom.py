@@ -36,6 +36,7 @@ from lockstep import CFG_BITS, config_word          # noqa: E402
 from pinmap import PinPlan                          # noqa: E402
 from rowformat import Format                        # noqa: E402
 from stt import Row, SttCore, SttProgram            # noqa: E402
+import programs as P_REF                            # noqa: E402
 
 STT_ROWS = 32
 ROW_W = 32
@@ -62,25 +63,102 @@ def blink_program():
     ])
 
 
+def uart_tx_program(period, byte):
+    """The isa_bench UART TX reference, with its byte source changed.
+
+    RETURNS (program, reference_core). The timing rows -- START, DATA, CHECK
+    and STOP, which are what actually make a UART frame -- are copied from
+    `programs.stt_uart_tx` untouched. Only the IDLE row changes, and it has to:
+
+        reference   Row("IDLE", "fifo", "START", pins={0:"lo"},
+                                 act=["load", "cload", "trst"])
+        here        Row("IDLE", "tmr",  "START", pins={0:"lo"},
+                                 act=["loadk", "cload", "trst"])
+
+    The reference is a HOST-FED transmitter. `fifo` tests the TX FIFO and
+    `load` pops a byte from it, so with no host attached `fifo` is permanently
+    false and the machine sits in IDLE forever without sending anything. The
+    pin plan cannot fix that -- it is not a pin assignment problem -- so the
+    byte source moves to `loadk`, which loads the configured constant K. Both
+    are first-class actions in SPEC section 6.
+
+    The gate becomes `tmr` rather than `always`, and that is not cosmetic.
+    With `always` the next frame starts the cycle after the stop bit ends, and
+    for 0x55 -- which alternates -- the line becomes an unbroken square wave:
+    every frame is start,1,0,1,0,1,0,1,0,stop = 0101010101, so the whole
+    stream is periodic with a period of two bit times and NO frame boundary
+    exists to find. A receiver still decodes 0x55 from any phase, but nothing
+    can verify the framing, in simulation or on a scope. `tmr` holds IDLE for
+    one more bit period, so each frame is start + 8 data + stop + one idle
+    bit, the line is high for two consecutive bit times between frames, and
+    the boundary is unambiguous.
+    """
+    _ref_core, ref = P_REF.STT_1PIN["uart_tx"](period)
+    rows = []
+    for r in ref.rows:
+        test, act = r.test, list(r.act)
+        if r.name == "IDLE":
+            test = "tmr"
+            act = ["loadk" if a == "load" else a for a in act]
+        rows.append(Row(r.name, test, r.t, f=r.f, pins=dict(r.pins), act=act))
+    return SttProgram(rows), _ref_core
+
+
+def baud_period(f_sys_hz, baud):
+    """(P, achieved baud, error fraction). P is an integer number of cycles,
+    so the achieved rate is rarely exactly the requested one."""
+    p = max(1, round(f_sys_hz / baud))
+    got = f_sys_hz / p
+    return p, got, (got - baud) / baud
+
+
 def toggle_divisor(f_sys_hz, seconds, period):
+
     """How many timer ticks make one toggle take `seconds`."""
     n = round(seconds * f_sys_hz / period)
     return max(1, min(255, n))       # counter 1 is 8 bits (SPEC section 2)
 
 
-def build(nsm, f_sys_hz, seconds, period):
-    prog = blink_program()
-    cload = toggle_divisor(f_sys_hz, seconds, period)
-
-    core = SttCore(
-        prog, slots=[("idle", "pp"), ("led", "pp")], ins=("in0", "in1"),
-        period=period, cload=(cload, 0, 0),
-        # Both start low, so the only pin that ever changes is the LED.
-        init_pins=[0, 0],
-        # Unused by this program, but every field is still a real
-        # configuration value and is range-checked at construction.
-        sr_width=8, c2load=0, loadk=0,
-    )
+def build(nsm, f_sys_hz, which, seconds, period, baud, byte):
+    """Returns everything the ROM and the report need, for one program."""
+    info = {}
+    if which == "blink":
+        prog = blink_program()
+        cload = toggle_divisor(f_sys_hz, seconds, period)
+        core = SttCore(
+            prog, slots=[("idle", "pp"), ("led", "pp")], ins=("in0", "in1"),
+            period=period, cload=(cload, 0, 0),
+            # Both start low, so the only pin that ever changes is the LED.
+            init_pins=[0, 0],
+            # Unused by this program, but every field is still a real
+            # configuration value and is range-checked at construction.
+            sr_width=8, c2load=0, loadk=0,
+        )
+        tx_slot, park_slot = 1, None
+        info["cload"] = cload
+        info["toggle_s"] = cload * period / f_sys_hz
+    else:
+        period, got, err = baud_period(f_sys_hz, baud)
+        prog, ref = uart_tx_program(period, byte)
+        core = SttCore(
+            prog, slots=[("tx", "pp")], ins=("in0", "in1"),
+            period=period,
+            # Bit order and the idle/stop level come from the reference core,
+            # not from this file: shift right puts the LSB out first and the
+            # fill bit is 1, so the line returns high after the last data bit.
+            shift=ref.shift, fill=ref.fill,
+            # K is what `loadk` puts in the shift register -- the byte sent.
+            loadk=byte,
+            # The reference sends cload_a bits after the start bit.
+            cload=ref.cvals,
+            sr_width=8, c2load=0,
+            # The line idles HIGH. pinv takes this while the machine is held,
+            # so the pin is already high when `run` releases it to the iomux.
+            init_pins=[1],
+        )
+        tx_slot, park_slot = 0, 2
+        info.update(baud_want=baud, baud_got=got, baud_err=err, byte=byte)
+    cload = info.get("cload", 0)
 
     words = list(Format("single5", "grouped", tgt_bits=8).encode(prog)["packed"])
     if len(words) > STT_ROWS:
@@ -91,8 +169,17 @@ def build(nsm, f_sys_hz, seconds, period):
     padded = words + [0] * (STT_ROWS - len(words))
 
     plan = PinPlan(nsm=nsm)
-    plan.drive(0, 1, 0)      # machine 0 SLOT 1 -> pin 0: driver index 1, so the
-                             # chain must carry a non-zero select for this pin
+    # Pin 0 is uo_out[0], Pmod JA pin 1.
+    plan.drive(0, tx_slot, 0)
+    if park_slot is not None:
+        # Every other pin is parked on a slot this program never writes, so it
+        # sits at its init value instead of carrying a copy of the signal. The
+        # select code for a parked pin is `park_slot`, which is NOT the value
+        # those fields reset to, so a chain that shifted the wrong content --
+        # all zeros, say -- shows up as traffic on fifteen pins that should be
+        # quiet. See the note on select codes in the report below.
+        for pin in range(1, 16):
+            plan.drive(0, park_slot, pin)
     for m in range(nsm):
         for i in range(2):
             plan.read(m, i, 0)
@@ -115,6 +202,7 @@ def build(nsm, f_sys_hz, seconds, period):
         cfg_bits |= one_cfg << (m * cfg_n)
 
     return dict(core=core, prog=prog, words=words, padded=padded, cload=cload,
+                which=which, tx_slot=tx_slot, park_slot=park_slot, info=info,
                 imem_bits=imem_bits, imem_n=imem_n, one_imem=one_imem,
                 cfg_bits=cfg_bits, cfg_n=cfg_n, nsm=nsm,
                 sel_bits=sel, sel_n=nsel, period=period, f_sys=f_sys_hz)
@@ -130,6 +218,14 @@ def main():
     ap.add_argument("--fclk", type=float, default=125e6, help="board clock Hz")
     ap.add_argument("--div", type=int, default=8, help="stt_fpga_top DIV")
     ap.add_argument("--nsm", type=int, default=1)
+    ap.add_argument("--program", choices=("blink", "uart_tx"), default="blink",
+                    help="blink is the known-good fallback: if it stops "
+                         "working, something regressed rather than the new "
+                         "program being wrong")
+    ap.add_argument("--baud", type=int, default=9600)
+    ap.add_argument("--byte", type=lambda x: int(x, 0), default=0x55,
+                    help="byte to transmit; 0x55 alternates 1010101 so a wrong "
+                         "baud gives visibly wrong characters, not plausible ones")
     ap.add_argument("--seconds", type=float, default=0.5,
                     help="seconds per LED toggle")
     ap.add_argument("--period", type=int, default=TIMER_MAX,
@@ -138,9 +234,25 @@ def main():
     a = ap.parse_args()
 
     f_sys = a.fclk / a.div
-    d = build(a.nsm, f_sys, a.seconds, a.period)
+    d = build(a.nsm, f_sys, a.program, a.seconds, a.period, a.baud, a.byte)
+    i = d["info"]
 
-    real = d["cload"] * d["period"] / f_sys
+    if a.program == "blink":
+        what = (f"//   timer period P     {d['period']} cycles = "
+                f"{d['period'] / f_sys * 1e3:.3f} ms\n"
+                f"//   counter 1 reload   {d['cload']} timer ticks\n"
+                f"//   LED toggles every  {i['toggle_s']:.3f} s"
+                f"  -> {1 / (2 * i['toggle_s']):.3f} Hz blink")
+    else:
+        what = (f"//   bit period P       {d['period']} cycles = "
+                f"{d['period'] / f_sys * 1e6:.3f} us\n"
+                f"//   baud requested     {i['baud_want']}\n"
+                f"//   baud achieved      {i['baud_got']:.2f}"
+                f"  ({i['baud_err'] * 100:+.4f}%)\n"
+                f"//   byte transmitted   0x{i['byte']:02X}, LSB first, "
+                f"continuously\n"
+                f"//   TX pin             uo_out[0] = Pmod JA pin 1")
+    real = i.get("toggle_s", 0)
     head = f"""// GENERATED by scripts/gen_fpga_rom.py -- do not edit.
 //
 // FPGA bring-up only. Not part of the ASIC submission.
@@ -148,11 +260,9 @@ def main():
 // Board clock {a.fclk / 1e6:g} MHz / DIV {a.div} = {f_sys / 1e6:.6g} MHz.
 // EVERY timing number below is against that divided clock, not the board's.
 //
-//   program            {len(d['words'])} rows, padded to {STT_ROWS} (SPEC section 10)
+//   program            {a.program}, {len(d['words'])} rows, padded to {STT_ROWS} (SPEC section 10)
 //   machines           {a.nsm}
-//   timer period P     {d['period']} cycles = {d['period'] / f_sys * 1e3:.3f} ms
-//   counter 1 reload   {d['cload']} timer ticks
-//   LED toggles every  {real:.3f} s  -> {1 / (2 * real):.3f} Hz blink
+{what}
 //
 // Streams are shifted LEAST-SIGNIFICANT BIT FIRST, which is what
 // rowenc.pack and the staging register in stt_imem.v agree on. Bit i of
@@ -161,6 +271,12 @@ def main():
     body = "\n".join([
         head,
         f"localparam integer STT_ROM_NSM   = {a.nsm};",
+        # Emitted so the testbench can assert the bit period without anyone
+        # re-typing it. A hand-copied timing constant that disagrees with the
+        # ROM is the same class of bug as a hand-copied bit stream.
+        f"localparam integer STT_ROM_PERIOD = {d['period']};",
+        f"localparam integer STT_ROM_IS_UART = {1 if a.program == 'uart_tx' else 0};",
+        f"localparam [7:0]   STT_ROM_BYTE   = 8'h{i.get('byte', 0):02X};",
         f"localparam integer STT_ROM_IMEM_N = {d['imem_n']};",
         f"localparam integer STT_ROM_CFG_N  = {d['cfg_n']};",
         f"localparam integer STT_ROM_SEL_N  = {d['sel_n']};",
@@ -178,13 +294,25 @@ def main():
     else:
         print(body)
 
+    print(f"  program        {a.program}")
     print(f"  rows           {len(d['words'])} -> padded {STT_ROWS}")
     print(f"  imem stream    {d['imem_n']} bits")
     print(f"  config stream  {d['cfg_n']} bits")
     print(f"  pin chain      {d['sel_n']} bits  (nsm={a.nsm})")
     print(f"  f_sys          {f_sys / 1e6:.6g} MHz")
-    print(f"  P              {d['period']} = {d['period'] / f_sys * 1e3:.3f} ms")
-    print(f"  cload          {d['cload']} ticks -> toggle every {real:.3f} s")
+    if a.program == "blink":
+        print(f"  P              {d['period']} = {d['period'] / f_sys * 1e3:.3f} ms")
+        print(f"  cload          {d['cload']} ticks -> toggle every {real:.3f} s")
+    else:
+        print(f"  P              {d['period']} cycles = "
+              f"{d['period'] / f_sys * 1e6:.3f} us per bit")
+        print(f"  baud           {i['baud_want']} requested, "
+              f"{i['baud_got']:.2f} achieved ({i['baud_err'] * 100:+.4f}%)")
+        print(f"  byte           0x{i['byte']:02X}, LSB first, continuous")
+        print(f"  TX             slot {d['tx_slot']} -> pin 0 (uo_out[0], JA1), "
+              f"select code {d['tx_slot']}")
+        print(f"  parked         pins 1..15 -> slot {d['park_slot']}, "
+              f"select code {d['park_slot']}")
     print(f"  first 3 words  {[hex(w) for w in d['padded'][:3]]}")
 
 

@@ -19,8 +19,8 @@ module tb_fpga_blink;
   // 125 MHz board clock
   always #4 clk = ~clk;
 
-  // DIV=2 keeps the simulation short; the loader and the design are unchanged.
-  stt_fpga_top #(.DIV(2)) dut (
+  // The clock ratio now comes from the Clocking Wizard stub, not a parameter.
+  stt_fpga_top dut (
     .clk(clk), .btn_raw(btn), .led_status(led), .uo_out(uo_out), .uio(uio)
   );
 
@@ -53,8 +53,15 @@ module tb_fpga_blink;
     #200;
     // Wait for the loader to finish, with a bound: an unbounded wait does not
     // fail, it hangs, and a hang says nothing about where it stuck.
-    for (i = 0; i < 200000 && !dut.ldr_done; i = i + 1) @(posedge dut.clk_sys);
-    if (!dut.ldr_done) begin
+    // !== 1, not !. Before the first clock edge the loader state register is
+    // X, so `done` is X and a loop conditioned on `!done` falls straight
+    // through into probes that run while the design is still in reset.
+    i = 0;
+    while (dut.ldr_done !== 1'b1 && i < 200000) begin
+      @(posedge dut.clk_sys);
+      i = i + 1;
+    end
+    if (dut.ldr_done !== 1'b1) begin
       $display("FAIL: loader never finished. state=%0d idx=%0d run=%b",
                dut.u_loader.state, dut.u_loader.idx, dut.u_stt.u_chip.run);
       $finish;
