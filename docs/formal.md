@@ -138,6 +138,87 @@ comment in `stt_core.v`; it is now proved.
     sby -f stt_core.sby p2          # PASS
     sby -f stt_core.sby p2_break    # FAIL, as required
 
+## P3 — decoder totality
+
+**Stated in `docs/SPEC.md` §4, before the assertions were written:**
+
+> A row is 32 bits and a host loads them raw, so every one of the 2^32 words is
+> reachable and the ISA has no trap. An unassigned test code does not pass: the
+> row takes its false exit and performs no action and no pin write. An
+> unassigned combination of pin slot and pin op writes nothing. No row word
+> leaves any architectural register undefined.
+
+**Result: PROVED**, in five parts, each a separate task so a failure names
+itself. All are over all 2^32 row words.
+
+| task | claim | result |
+|---|---|---|
+| `p3_a` | every variable bit-select the shift register is read through is in range | PROVED, under the precondition below |
+| `p3_b` | test codes 11–15 do not pass, and such a row pushes and pops nothing | PROVED |
+| `p3_c` | a single-slot pin op never disturbs a slot it does not address | PROVED |
+| `p3_d` | the documented no-ops — `hold`, and `d0`/`d1` sent to a single slot rather than the pair — write nothing at all | PROVED |
+| `p3_e` | a row that does not fire changes no architectural state but the row pointer and the timer | PROVED |
+
+**Negative tests — all FAIL as required:**
+
+| task | the break |
+|---|---|
+| `p3_b_break` | unassigned codes 11–15 pass instead of failing |
+| `p3_c_break` | the pin write also lands on slot 0, so a row disturbs a slot it never addressed |
+| `p3_d_break` | `d0` on a single slot writes rather than being the §7 no-op |
+| `p3_e_break` | the shift register updates whether or not the test passed |
+
+`p3_a`'s ability to fail is not a synthetic break — it is `p3_srwidth`, below.
+
+**Reproduce:**
+
+    cd rtl2/formal
+    for t in p3_a p3_b p3_c p3_d p3_e; do sby -f stt_core.sby $t; done
+    for t in p3_b_break p3_c_break p3_d_break p3_e_break; do sby -f stt_core.sby $t; done
+
+### An assertion of mine that was wrong, and how it showed
+
+`p3_e` failed when first written. The design was right and the assertion was
+not: it guarded on the *current* cycle's `en` and `test_pass`, but `$stable`
+compares this cycle's value against the last, and that change was decided by
+the row executing one cycle earlier. Guarding on the current condition asks
+whether state is stable across an edge that condition did not control — a
+different claim, and a false one. The guard is now on `$past(en)` and
+`!$past(test_pass)`.
+
+Recording it because the failure was indistinguishable at first sight from a
+design finding, and the rule for this work is to report a failure rather than
+weaken the assertion. The way to tell them apart was to split P3 into five
+tasks so the failure named which claim it was, rather than reading a
+counterexample — which this toolchain cannot produce as a waveform anyway.
+
+### Spec gap this exposed: `sr_width` has no range
+
+**P3 cannot be proved without a precondition on the configuration**, and that
+is the finding. §2 names `sr_width` but gives it no range, and nothing clamps
+the 4-bit field a host loads. The shift register is 8 bits, so a width of 0 or
+9–15 makes `srbit_of` select bit 15, or bits 8–14, of an 8-bit register.
+
+`p3_srwidth` is `p3_a` with the precondition removed. It **FAILS**, which is
+the formal half of the evidence. The other half is what it costs, which the
+bound check alone does not show:
+
+    cd rtl2 && iverilog -g2012 -I . -o /tmp/srw.out formal/srwidth_demo.v stt_core.v && /tmp/srw.out
+
+    Row 0x00030030 = always / step / slot0 <- sr, MSB-first.
+      sr_width=8 (in range): pin_out = 000
+      sr_width=1 (in range): pin_out = 000
+      sr_width=0 (NO RANGE): pin_out = 00x
+      sr_width=9 (NO RANGE): pin_out = 00x
+      sr_width=15 (NO RANGE): pin_out = 00x
+
+The undefined bit reaches the pin. Nothing traps, and nothing in the repo
+covered the region: every program the encoder emits sets a width in range, so
+the whole lockstep and random-program apparatus only ever exercises legal
+widths. Recorded in §16.1. An implementation must either bound the field or
+define what out-of-range means; this one does neither yet, and that is a
+decision for the design rather than something this document should invent.
+
 ## Synthesis is unaffected
 
 All formal code is inside `` `ifdef FORMAL ``, which production synthesis never

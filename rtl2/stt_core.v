@@ -246,7 +246,12 @@ module stt_core #(
       `STT_T_IN1H:   test_pass =  in_s[1];
       `STT_T_IN1L:   test_pass = ~in_s[1];
       `STT_T_STALL:  test_pass = stall_pre;
+`ifdef BREAK_P3B
+      // Negative test only: unassigned codes 11-15 PASS.
+      default:       test_pass = 1'b1;
+`else
       default:       test_pass = 1'b0;   // codes 11-15 unassigned (SPEC section 4)
+`endif
     endcase
   end
   wire fire = en & test_pass;
@@ -386,10 +391,20 @@ module stt_core #(
         `STT_P_SR:   want = srbit_post;
         `STT_P_TGL:  want = ~pinv[f_slot];
         `STT_P_CRCB: begin want = crc16_out_bit; crcb_used = 1'b1; end
+`ifdef BREAK_P3D
+        // Negative test only: d0 on a single slot writes rather than being
+        // the no-op SPEC section 7 specifies.
+        `STT_P_D0:   want = 1'b0;
+`endif
         // hold, and d0/d1 on a single slot: no write (SPEC section 7).
         default:     has_want = 1'b0;
       endcase
       if (has_want) begin
+`ifdef BREAK_P3C
+        // Negative test only: the write also lands on slot 0, so a row
+        // disturbs a slot it never addressed.
+        pinv_next[0] = 1'b1;
+`endif
         if (cfg_stuff_slots[f_slot]) begin
           if (stall_mid) begin
             emit             = ~stuff_last_mid;
@@ -509,7 +524,12 @@ module stt_core #(
     end else begin
       rowp   <= row_next;
       link   <= link_next;
+`ifdef BREAK_P3E
+      // Negative test only: sr updates whether or not the test passed.
+      sr     <= sr_next;
+`else
       sr     <= test_pass ? sr_next   : sr;
+`endif
       cnt    <= test_pass ? cnt_next  : cnt;
       c2     <= test_pass ? c2_next   : c2;
       crc    <= test_pass ? crc_next  : crc;
@@ -637,6 +657,80 @@ module stt_core #(
   // rx_data is sr_mid, the value before any shift, which is only the right
   // thing to push because a row cannot both push and shift.
   always @* assert (!(act_push && act_shift));
+`endif
+
+`ifdef P3_COMMON
+  // P3 -- decoder totality (SPEC sections 4 and 7).
+  //
+  // A row is 32 bits and a host loads them raw, so all 2^32 words are
+  // reachable and there is no trap. Every one must decode to defined
+  // behaviour.
+
+`ifndef P3_NO_CFG_ASSUME
+  // Configuration precondition. The shift register is SR_W bits, so a width
+  // outside 1..SR_W makes srbit_of select a bit that does not exist. SPEC
+  // section 2 gives sr_width no range and nothing clamps the field, which is
+  // recorded as a gap in section 16.1; the p3_srwidth task is this same
+  // property with the assumption removed, and it FAILS.
+  always @* assume (cfg_sr_width >= 4'd1 && cfg_sr_width <= SR_W[3:0]);
+`endif
+
+`endif
+`ifdef P3_A
+  // (a) The variable bit-select the shift register is read through is in
+  //     range. This is what the precondition buys, stated explicitly so that
+  //     removing the precondition fails here and nowhere confusing.
+  always @* assert (msb_idx < SR_W[3:0]);
+
+`endif
+`ifdef P3_B
+  // (b) Unassigned test codes 11-15 do not pass, so the row takes its false
+  //     exit and, because `fire` is gated on the test, performs no action and
+  //     no pin write.
+  always @* if (f_test > `STT_T_STALL) begin
+    assert (test_pass == 1'b0);
+    assert (!rx_push);
+    assert (!tx_pop);
+  end
+
+`endif
+`ifdef P3_C
+  // (c) A row performs at most one pin write (section 7): a single-slot op
+  //     never disturbs a slot it does not address.
+  always @* if (f_slot != `STT_SLOT_PAIR) begin
+    assert ((pinv_next & ~(3'd1 << f_slot)) == (pinv & ~(3'd1 << f_slot)));
+  end
+
+`endif
+`ifdef P3_D
+  // (d) The documented no-ops write nothing at all: `hold` on either kind of
+  //     slot, and d0/d1 addressed to a single slot rather than to the pair.
+  always @* if (f_pinop == `STT_P_HOLD) assert (pinv_next == pinv);
+  always @* if (f_slot != `STT_SLOT_PAIR &&
+                (f_pinop == `STT_P_D0 || f_pinop == `STT_P_D1))
+    assert (pinv_next == pinv);
+
+`endif
+`ifdef P3_E
+  // (e) A row that does not fire changes no architectural state but the row
+  //     pointer and the timer, whatever it decodes to.
+  //
+  // The guard is on the PREVIOUS cycle's en and test_pass, not this one's.
+  // $stable compares this value against the last, and that change was decided
+  // by the row that was executing then. Guarding on the current cycle's
+  // condition asks whether the state is stable across an edge the condition
+  // did not control, which is a different claim and a false one -- it is what
+  // this assertion said when first written, and it failed.
+  always @(posedge clk) if (f_past_valid && rst_n && $past(rst_n)
+                            && $past(en) && !$past(test_pass)) begin
+    assert ($stable(sr));
+    assert ($stable(cnt));
+    assert ($stable(c2));
+    assert ($stable(crc));
+    assert ($stable(crc16));
+    assert ($stable(pinv));
+    assert ($stable(link));
+  end
 `endif
 
 `endif

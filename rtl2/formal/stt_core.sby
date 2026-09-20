@@ -6,7 +6,16 @@ p1_break_ret
 p1_break_skip
 p2
 p2_break
-p3
+p3_a
+p3_b
+p3_c
+p3_d
+p3_e
+p3_b_break
+p3_c_break
+p3_d_break
+p3_e_break
+p3_srwidth
 p5
 
 [options]
@@ -29,7 +38,18 @@ p1_break_ret:  read -formal -DFORMAL -DP1 -DBREAK_P1  stt_core.v
 p1_break_skip: read -formal -DFORMAL -DP1 -DBREAK_P1B stt_core.v
 p2:       read -formal -DFORMAL -DP2 stt_core.v
 p2_break: read -formal -DFORMAL -DP2 -DBREAK_P2 stt_core.v
-p3: read -formal -DFORMAL -DP3 stt_core.v
+p3_a:        read -formal -DFORMAL -DP3_COMMON -DP3_A stt_core.v
+p3_b:        read -formal -DFORMAL -DP3_COMMON -DP3_B stt_core.v
+p3_c:        read -formal -DFORMAL -DP3_COMMON -DP3_C stt_core.v
+p3_d:        read -formal -DFORMAL -DP3_COMMON -DP3_D stt_core.v
+p3_e:        read -formal -DFORMAL -DP3_COMMON -DP3_E stt_core.v
+# Not a negative test: (a) with the sr_width precondition removed. It FAILS,
+# which is the evidence for the SPEC 16.1 gap.
+p3_b_break:  read -formal -DFORMAL -DP3_COMMON -DP3_B -DBREAK_P3B stt_core.v
+p3_c_break:  read -formal -DFORMAL -DP3_COMMON -DP3_C -DBREAK_P3C stt_core.v
+p3_d_break:  read -formal -DFORMAL -DP3_COMMON -DP3_D -DBREAK_P3D stt_core.v
+p3_e_break:  read -formal -DFORMAL -DP3_COMMON -DP3_E -DBREAK_P3E stt_core.v
+p3_srwidth:  read -formal -DFORMAL -DP3_COMMON -DP3_A -DP3_NO_CFG_ASSUME stt_core.v
 p5: read -formal -DFORMAL -DP5 stt_core.v
 prep -top stt_core
 # The core resets asynchronously; the AIGER engines need a synchronous model.

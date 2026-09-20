@@ -230,6 +230,15 @@ Traced to `SttCore._test` in `isa_bench/stt.py`. Code 10 is `stall`, the bit
 stuffer test of §9; it is implemented in the models and in `rtl2`. Codes
 11–15 are unassigned; see §16.
 
+**SPECIFIED — what the hardware does with them, and it is formally proved.**
+A row is 32 bits and a host loads them raw, so every one of the 2^32 words is
+reachable and the ISA has no trap. An unassigned test code **does not pass**:
+the row takes its false exit and performs no action and no pin write. An
+unassigned combination of pin slot and pin op writes nothing. No row word
+leaves any architectural register undefined. Proved over all 2^32 row words in
+`docs/formal.md` P3, subject to the configuration precondition recorded there
+and in §16.1.
+
 Three of these need their sampling point stated precisely, and §8 does so:
 
 - `in0h`, `in0l`, `in1h`, `in1l` read through the input synchronizer, not the
@@ -1407,6 +1416,7 @@ and where the evidence stops.
 |---|---|---|
 | **Timer width** | `tcount` is an unbounded integer in the models. The structural RTL uses 16 bits. Must cover the required reload period `P`. | §2, §8.4 |
 | **Test codes 11–15** | Unassigned. The models would raise on decode. Code 10 and pin op code 7 are now implemented (§9). | §4, §7 |
+| **`sr_width` outside 1–8** | §2 names `sr_width` but gives it no range, and nothing constrains the 4-bit configuration field a host loads. The shift register is 8 bits, so a width of 0 or 9–15 makes the `srbit` test and the `sr` pin op read bit 15 or bits 8–14 of an 8-bit register: an out-of-range select, which is undefined, and it reaches a pin. Found by `docs/formal.md` P3, which cannot prove decode totality without assuming the range. An implementation must either bound the field or define what out-of-range means; this one does neither yet. | §2, §7 |
 | **Target values 32–254** | §5 says the target field addresses rows with 255 reserved for return, but only rows 0–31 exist (§12), so targets 32–254 name no row and §5 does not say what they mean. Found while stating §5 precisely enough to prove it. This implementation takes the low 5 bits, so target 40 addresses row 8; `rowenc` never emits such a target, so only a host writing raw row words can reach one, and no test covered the region before `docs/formal.md` P1 quantified over it. | §5, §12 |
 | **A 33rd row in hardware** | The toolchain rejects it. The structural RTL's 5-bit write pointer wraps and overwrites row 0. | §12 |
 | **Live reprogramming** | §11.1 specifies that the `run` flag is cleared only by `rst_n`, so reprogramming means asserting reset. What a machine does on the first cycle after a reload short of reset is still undefined. | §10, §11.1 |

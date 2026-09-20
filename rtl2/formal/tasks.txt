@@ -5,3 +5,13 @@ stt_core:p1_break_ret:fail:P1 negative -- RET on the true exit only
 stt_core:p1_break_skip:fail:P1 negative -- SKIP exits swapped
 stt_core:p2:pass:P2 action groups mutually exclusive for every row word
 stt_core:p2_break:fail:P2 negative -- push also decoded from the clr+shift code
+stt_core:p3_a:pass:P3a variable bit-selects in range
+stt_core:p3_b:pass:P3b unassigned test codes never pass
+stt_core:p3_c:pass:P3c a row writes at most one slot
+stt_core:p3_d:pass:P3d documented no-ops write nothing
+stt_core:p3_e:pass:P3e a row that does not fire changes no state
+stt_core:p3_b_break:fail:P3b negative -- unassigned test codes pass
+stt_core:p3_c_break:fail:P3c negative -- write also clobbers slot 0
+stt_core:p3_d_break:fail:P3d negative -- d0 on a single slot writes
+stt_core:p3_e_break:fail:P3e negative -- sr updates without firing
+stt_core:p3_srwidth:fail:P3 without the sr_width precondition -- the SPEC 16.1 gap
