@@ -196,6 +196,7 @@ check: spec-check
 	   test -f $(BUILD)/$$r.log && python3 scripts/check_area.py $(BUILD)/$$r.log --comb-ok || true; \
 	 done
 	@python3 scripts/check_slope.py $(BUILD)
+	@$(MAKE) --no-print-directory formal
 	@$(MAKE) --no-print-directory check-mutation
 
 # Mutation score is a validity gate, not a report: if it falls, the benchmarks
@@ -323,6 +324,16 @@ rtl2-slope: lib-check
 .PHONY: rtl2-chip
 rtl2-chip:
 	@cd rtl2 && $(COCOTB_PY) tb/run_chip.py
+
+# Formal properties of the decode and control logic, and the negative test for
+# each one. The negative tests are part of the gate: a break that PASSES means
+# the assertion cannot detect the bug it exists to detect, and this repo has
+# already shipped one gate that could not fail. Whole set runs in ~2 s, so it
+# is inside `check` rather than a separate target. See docs/formal.md.
+.PHONY: formal
+formal:
+	@bash rtl2/formal/run_formal.sh
+	@bash rtl2/formal/check_synth_clean.sh
 
 # Does the instruction memory hold what was shifted into it? Every lockstep
 # suite loads through this one path, so a load that drops bits is invisible to

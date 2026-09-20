@@ -299,6 +299,15 @@ next from row 31 wraps to row 0. Taken from rtl/stt_decode.v:73, which needs no 
 
 <!-- END GENERATED: next-row-rule -->
 
+**SPECIFIED — the resolver is total, and formally proved so.** For every branch
+mode, every 8-bit target field, every current row and either outcome of the
+test, the resolver selects exactly one next row, and it is the one this
+section names: `target` is the target field taken as a row index, `self` is the
+row currently executing, `next` is `(row + 1) mod 32`, and a target of 255 on
+whichever exit the target field feeds selects the row held in the link register
+after this row's own `call`. While a machine is not enabled the row pointer does
+not move. Proved over the whole input space, unbounded, in `docs/formal.md` P1.
+
 This resolves what earlier revisions left undefined. It is the rule the
 structural RTL already implements, it needs no program-length register, and no
 reference program can tell the difference: all six end on a `WAIT` row, whose
@@ -1387,6 +1396,7 @@ and where the evidence stops.
 |---|---|---|
 | **Timer width** | `tcount` is an unbounded integer in the models. The structural RTL uses 16 bits. Must cover the required reload period `P`. | §2, §8.4 |
 | **Test codes 11–15** | Unassigned. The models would raise on decode. Code 10 and pin op code 7 are now implemented (§9). | §4, §7 |
+| **Target values 32–254** | §5 says the target field addresses rows with 255 reserved for return, but only rows 0–31 exist (§12), so targets 32–254 name no row and §5 does not say what they mean. Found while stating §5 precisely enough to prove it. This implementation takes the low 5 bits, so target 40 addresses row 8; `rowenc` never emits such a target, so only a host writing raw row words can reach one, and no test covered the region before `docs/formal.md` P1 quantified over it. | §5, §12 |
 | **A 33rd row in hardware** | The toolchain rejects it. The structural RTL's 5-bit write pointer wraps and overwrites row 0. | §12 |
 | **Live reprogramming** | §11.1 specifies that the `run` flag is cleared only by `rst_n`, so reprogramming means asserting reset. What a machine does on the first cycle after a reload short of reset is still undefined. | §10, §11.1 |
 | **Power-up before the first clock edge** | Output pin state between power-up and reset is not modelled. | §11 |

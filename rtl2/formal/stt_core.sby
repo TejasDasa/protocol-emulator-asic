@@ -1,0 +1,44 @@
+# Formal properties of the STT core. One task per property so each is proved,
+# and negative-tested, on its own. See docs/formal.md.
+[tasks]
+p1
+p1_break_ret
+p1_break_skip
+p2
+p3
+p5
+
+[options]
+mode prove
+# The trace converter needs an SMT solver to emit a VCD and this toolchain has
+# none (only yosys-abc). Pass/fail is decided by the engine either way; the
+# AIGER witness is still written to <task>/engine_0/trace.aiw.
+aigsmt none
+depth 20
+
+[engines]
+abc pdr
+
+[script]
+p1: read -formal -DFORMAL -DP1 stt_core.v
+# Negative tests: each must FAIL. An assertion that cannot fail is worse
+# than no assertion -- this repo has already shipped one (the macro-power
+# check that passed while the PDN was disconnected).
+p1_break_ret:  read -formal -DFORMAL -DP1 -DBREAK_P1  stt_core.v
+p1_break_skip: read -formal -DFORMAL -DP1 -DBREAK_P1B stt_core.v
+p2: read -formal -DFORMAL -DP2 stt_core.v
+p3: read -formal -DFORMAL -DP3 stt_core.v
+p5: read -formal -DFORMAL -DP5 stt_core.v
+prep -top stt_core
+# The core resets asynchronously; the AIGER engines need a synchronous model.
+async2sync
+# Undefined bits (out-of-range variable selects, 7 of them) become adversarial
+# free signals rather than zeros: a property that passes then holds for EVERY
+# value the undefined bit could take, instead of for the one the tool picked.
+techmap
+setundef -undriven -anyseq
+opt -fast
+
+[files]
+../stt_core.v
+../stt_isa.vh

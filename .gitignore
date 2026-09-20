@@ -78,3 +78,7 @@ rtl2/.synth_array.resolved.ys
 rtl2/.synth_cfgmem.resolved.ys
 rtl2/sim_build_chip/
 rtl2/sim_build_fifo/
+
+# ---- SymbiYosys working directories ---------------------------------------
+# sby creates one directory per task next to the .sby file.
+rtl2/formal/stt_*_p*/

@@ -420,7 +420,13 @@ module stt_core #(
     case (f_mode)
       `STT_M_WAIT:   begin exit_t = tgt_row;  exit_f = rowp;     t_from_tgt = 1'b1; f_from_tgt = 1'b0; end
       `STT_M_BRANCH: begin exit_t = tgt_row;  exit_f = next_seq; t_from_tgt = 1'b1; f_from_tgt = 1'b0; end
+`ifdef BREAK_P1B
+      // Negative test only: SKIP's exits swapped, so it behaves like BRANCH.
+      `STT_M_SKIP:   begin exit_t = tgt_row;  exit_f = next_seq; t_from_tgt = 1'b1; f_from_tgt = 1'b0; end
+`else
       `STT_M_SKIP:   begin exit_t = next_seq; exit_f = tgt_row;  t_from_tgt = 1'b0; f_from_tgt = 1'b1; end
+`endif
+
       default:       begin exit_t = next_seq; exit_f = rowp;     t_from_tgt = 1'b0; f_from_tgt = 1'b0; end
     endcase
   end
@@ -432,8 +438,16 @@ module stt_core #(
   reg [ADDR_W-1:0] row_next;
   always @* begin
     if (!en)             row_next = rowp;
+`ifdef BREAK_P1
+    // Negative test only: RET resolved on the TRUE exit whatever fed it,
+    // which is what SttCore did until 2026-09-16. A SKIP row with target 255
+    // then returns when its test passes instead of when it fails.
+    else if (test_pass)  row_next = tgt_ret ? link_next : exit_t;
+    else                 row_next = exit_f;
+`else
     else if (test_pass)  row_next = (t_from_tgt & tgt_ret) ? link_next : exit_t;
     else                 row_next = (f_from_tgt & tgt_ret) ? link_next : exit_f;
+`endif
   end
 
   // ---- step 6: the timer, which updates whether or not the test passed --
@@ -518,5 +532,74 @@ module stt_core #(
   assign dbg_stuff_last  = stuff_last;
   assign dbg_stuff_valid = stuff_valid;
 
+// ---------------------------------------------------------------------------
+// Formal properties. Guarded so synthesis never parses them; `make formal`
+// defines FORMAL and one P<n>. See docs/formal.md.
+// ---------------------------------------------------------------------------
+`ifdef FORMAL
+
+  // Start from reset, once. Without this the proof also quantifies over
+  // states no reset can produce, which is not what any of these claim.
+  reg f_past_valid = 1'b0;
+  always @(posedge clk) f_past_valid <= 1'b1;
+  always @(posedge clk) if (!f_past_valid) assume (!rst_n);
+
+`ifdef P1
+  // P1 -- branch resolver totality (SPEC section 5).
+  //
+  // Transcribed from section 5's table as "which of the three sources does
+  // each exit take", deliberately NOT as the implementation's exit_t/exit_f
+  // pair. A copy of the implementation would agree with it by construction;
+  // this agrees with it only if both read the table the same way, so a
+  // priority slip or a swapped mode column in either one shows up.
+  localparam [1:0] F_SRC_TGT = 2'd0, F_SRC_SELF = 2'd1, F_SRC_NEXT = 2'd2;
+  reg [1:0] f_src_t, f_src_f;
+  always @* begin
+    case (f_mode)
+      `STT_M_WAIT:   begin f_src_t = F_SRC_TGT;  f_src_f = F_SRC_SELF; end
+      `STT_M_BRANCH: begin f_src_t = F_SRC_TGT;  f_src_f = F_SRC_NEXT; end
+      `STT_M_SKIP:   begin f_src_t = F_SRC_NEXT; f_src_f = F_SRC_TGT;  end
+      `STT_M_STEP:   begin f_src_t = F_SRC_NEXT; f_src_f = F_SRC_SELF; end
+      default:       begin f_src_t = F_SRC_NEXT; f_src_f = F_SRC_SELF; end
+    endcase
+  end
+  wire [1:0] f_src = test_pass ? f_src_t : f_src_f;
+
+  // `next` = (row + 1) mod 32, written as the arithmetic the spec states
+  // rather than as the implementation's compare-against-all-ones.
+  wire [ADDR_W:0]   f_wide_next = {1'b0, rowp} + 1'b1;
+  wire [ADDR_W-1:0] f_next_seq  = f_wide_next[ADDR_W-1:0];
+
+  reg [ADDR_W-1:0] f_ref_row;
+  always @* begin
+    case (f_src)
+      F_SRC_TGT:  f_ref_row = (f_tgt == `STT_RET) ? link_next
+                                                  : f_tgt[ADDR_W-1:0];
+      F_SRC_SELF: f_ref_row = rowp;
+      default:    f_ref_row = f_next_seq;
+    endcase
+  end
+
+  // The resolver agrees with section 5 for every (mode, target, row, outcome).
+  always @* if (en) assert (row_next == f_ref_row);
+
+  // A machine that is not enabled does not move.
+  always @* if (!en) assert (row_next == rowp);
+
+  // Totality. ADDR_W is 5, so this cannot fail in this implementation and is
+  // reported as structural rather than as a result -- it is here so that
+  // widening ADDR_W without widening the target handling fails loudly.
+  always @* assert (row_next < `STT_ROWS);
+
+  // RET is the target FIELD's property, not the true exit's: a SKIP row with
+  // target 255 returns when its test FAILS. Stated separately because this is
+  // the case that was wrong until 2026-09-16.
+  always @* if (en && (f_mode == `STT_M_SKIP) && (f_tgt == `STT_RET) && !test_pass)
+    assert (row_next == link_next);
+  always @* if (en && (f_mode == `STT_M_SKIP) && (f_tgt == `STT_RET) && test_pass)
+    assert (row_next == f_next_seq);
+`endif
+
+`endif
 endmodule
 `default_nettype wire

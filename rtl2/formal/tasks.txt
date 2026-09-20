@@ -1,0 +1,5 @@
+# sbyfile:task:expected(pass|fail):description
+# Negative tasks MUST fail; that is what makes the positive result mean something.
+stt_core:p1:pass:P1 branch resolver agrees with SPEC 5 for every input
+stt_core:p1_break_ret:fail:P1 negative -- RET on the true exit only
+stt_core:p1_break_skip:fail:P1 negative -- SKIP exits swapped
