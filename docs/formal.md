@@ -29,7 +29,7 @@ that was supposed to fail.
 
 ### Spec gaps the exercise exposed
 
-Three, all of the same kind, and all found by the act of stating a property
+Three, two of them the same kind, and all found by the act of stating a property
 precisely enough to assert it rather than by any proof failing:
 
 | gap | what was missing | now in |

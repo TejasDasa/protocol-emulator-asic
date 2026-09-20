@@ -21,6 +21,10 @@ low-speed token TX, JTAG TAP, CAN, and a UART protocol detector.
 - **[`docs/writeup.md`](docs/writeup.md)** — the argument: what the
   architecture makes possible, why the shared units exist, and what the
   verification found.
+- **[`docs/formal.md`](docs/formal.md)** — five properties of the decode and
+  control logic proved over the whole input space, each with the deliberate
+  break that must make it fail, and the three specification gaps the exercise
+  exposed.
 - **[`docs/row-format-decision.md`](docs/row-format-decision.md)** — how the
   row format was chosen, and what the alternatives cost.
 - **[`docs/area-study.md`](docs/area-study.md)** — the area and integration
@@ -66,7 +70,7 @@ inconsistency.
  
 ## Verification
  
-Four adversarial layers, all of which must pass:
+Five adversarial layers, all of which must pass:
  
 - **Cycle-exact lockstep.** The RTL and the Python model step together and are
   compared every cycle on every architectural register and FIFO operation, not
@@ -82,6 +86,11 @@ Four adversarial layers, all of which must pass:
 - **Directed tests.** The instruction-memory load path and the pin boundary,
   where the lockstep suites are blind because every program loads through the
   same path.
+- **Formal proof.** Five properties quantified over the whole input space
+  instead of sampled, each with a deliberate break that must make the proof
+  fail. `make formal`, and it runs inside `make check`. This is what found
+  three regions the specification left undefined, in input space no encoder
+  emits and no other test reaches.
 Timing is part of conformance: UART TX and USB require zero jitter, SPI and
 I²C require every clock phase to meet its minimum, and the device models
 inject phase offset and jitter rather than producing clock-aligned edges.

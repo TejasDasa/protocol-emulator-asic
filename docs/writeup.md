@@ -176,7 +176,7 @@ arbitration means a machine waits, and §8.1 leaves nowhere for that wait to go.
 That rule was written only after the same conclusion was reached twice
 independently and by surprise: once for the host FIFOs, once for the §9 units.
 
-### 4.2 The verification is adversarial, in four layers
+### 4.2 The verification is adversarial, in five layers
 
 - **Cycle-exact lockstep.** The Python models drive the world; the RTL shadows
   them and is compared every cycle on row, link, `sr`, `cnt`, `c2`, `crc`,
@@ -190,11 +190,25 @@ independently and by surprise: once for the host FIFOs, once for the §9 units.
 - **Through the real pins.** Five machines configured over `ui_in`, run through
   the Tiny Tapeout boundary for 2,000 cycles with every assigned driver checked
   on its assigned pin, and host bytes moved over the serial port of §11.2.
+- **Formal proof.** Five properties of the decode and control logic, quantified
+  over the whole input space rather than sampled: the branch resolver against
+  §5 for every mode, target, row and outcome; action-group exclusion for every
+  one of the 2^32 row words; decoder totality; FIFO state consistency; and the
+  timer's one-tick-in-`P` rule. Four are unbounded proofs; the timer is proved
+  for every period at a reduced counter width and bounded to depth 80 at the
+  real one, and `docs/formal.md` says which is which. This is the layer that
+  reaches what coverage cannot: it found **three regions the specification
+  left undefined** -- two configuration fields with no stated legal range, and
+  a span of target values naming no row -- all of them places no encoder emits
+  and no test reaches.
 
 Every gate is checked in both directions where that is possible. The
 pin-assignment builder is verified to reject six classes of unusable assignment
 *and* to accept valid ones; the phase machinery is verified to change the
-waveform *and* to leave the default byte-identical.
+waveform *and* to leave the default byte-identical. Every formal property
+ships with a deliberate break that must make the proof fail, and the break passing is a
+build failure -- an assertion that cannot fail is worse than none, and this
+repo has already shipped one such gate.
 
 ### 4.3 What verification found, and the failure modes behind it
 
