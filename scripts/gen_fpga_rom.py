@@ -119,9 +119,40 @@ def toggle_divisor(f_sys_hz, seconds, period):
     return max(1, min(255, n))       # counter 1 is 8 bits (SPEC section 2)
 
 
+# Loopback pin assignment. TX must be a uo_out pin and RX must read a uio pin,
+# because the iomux's input map is pin_val = {uio_in, ui_in}: pin index p < 8
+# reads ui_in[p], NOT uo_out[p]. uo_out and ui_in are different physical pins
+# that happen to share an index, so a machine CANNOT read back a uo_out pin and
+# the loop has to leave the chip and come back on uio.
+LB_TX_PIN    = 0    # uo_out[0], Pmod JA pin 1
+LB_RX_PIN    = 8    # uio[0],    Pmod JB pin 1
+LB_DOUT_PIN  = 1    # uo_out[1], Pmod JA pin 2 -- host port data out
+LB_STB_PIN   = 7    # ui_in[7]  -- host port strobe
+LB_DIN_PIN   = 6    # ui_in[6]  -- host port data in
+
+
+def pad_rows(prog):
+    words = list(Format("single5", "grouped", tgt_bits=8).encode(prog)["packed"])
+    if len(words) > STT_ROWS:
+        raise SystemExit(f"{len(words)} rows, max {STT_ROWS}")
+    # SPEC section 10: the host MUST load all 32 rows. A short load leaves the
+    # CFGMEM chain rotated; the behavioural imem is padded identically so the
+    # FPGA and ASIC paths take the same stream.
+    return words, words + [0] * (STT_ROWS - len(words))
+
+
 def build(nsm, f_sys_hz, which, seconds, period, baud, byte):
-    """Returns everything the ROM and the report need, for one program."""
+    """Returns everything the ROM and the report need.
+
+    `cores` and `progs` are per machine, index 0 first. A machine with no
+    program of its own gets an all-zero one, which decodes to
+    `always / WAIT / target 0` -- a self-loop at row 0 that performs no action
+    and writes no pin -- but still takes a real configuration, because an
+    all-zero config would mean P = 0.
+    """
     info = {}
+    cores, progs = [], []
+
     if which == "blink":
         prog = blink_program()
         cload = toggle_divisor(f_sys_hz, seconds, period)
@@ -130,80 +161,116 @@ def build(nsm, f_sys_hz, which, seconds, period, baud, byte):
             period=period, cload=(cload, 0, 0),
             # Both start low, so the only pin that ever changes is the LED.
             init_pins=[0, 0],
-            # Unused by this program, but every field is still a real
-            # configuration value and is range-checked at construction.
             sr_width=8, c2load=0, loadk=0,
         )
-        tx_slot, park_slot = 1, None
-        info["cload"] = cload
-        info["toggle_s"] = cload * period / f_sys_hz
-    else:
+        cores, progs = [core], [prog]
+        info.update(cload=cload, toggle_s=cload * period / f_sys_hz)
+
+        def plan_of(plan):
+            plan.drive(0, 1, 0)          # slot 1 -> pin 0: select code 1
+            for m in range(nsm):
+                for i in range(2):
+                    plan.read(m, i, 0)
+            return None
+
+    elif which == "uart_tx":
         period, got, err = baud_period(f_sys_hz, baud)
         prog, ref = uart_tx_program(period, byte)
         core = SttCore(
-            prog, slots=[("tx", "pp")], ins=("in0", "in1"),
-            period=period,
+            prog, slots=[("tx", "pp")], ins=("in0", "in1"), period=period,
             # Bit order and the idle/stop level come from the reference core,
-            # not from this file: shift right puts the LSB out first and the
-            # fill bit is 1, so the line returns high after the last data bit.
-            shift=ref.shift, fill=ref.fill,
-            # K is what `loadk` puts in the shift register -- the byte sent.
-            loadk=byte,
-            # The reference sends cload_a bits after the start bit.
-            cload=ref.cvals,
-            sr_width=8, c2load=0,
-            # The line idles HIGH. pinv takes this while the machine is held,
-            # so the pin is already high when `run` releases it to the iomux.
+            # not from this file.
+            shift=ref.shift, fill=ref.fill, loadk=byte, cload=ref.cvals,
+            sr_width=8, c2load=0, init_pins=[1],
+        )
+        cores, progs = [core], [prog]
+        info.update(baud_want=baud, baud_got=got, baud_err=err, byte=byte)
+
+        def plan_of(plan):
+            plan.drive(0, 0, LB_TX_PIN)
+            # Every other pin parks on machine 0 slot 2, which this program
+            # never writes. Select code 2 is NOT what those fields reset to,
+            # so a chain carrying the wrong content shows up as traffic on
+            # pins that should be quiet.
+            for pin in range(1, 16):
+                plan.drive(0, 2, pin)
+            for m in range(nsm):
+                for i in range(2):
+                    plan.read(m, i, 0)
+            return None
+
+    else:                                 # loopback
+        if nsm < 2:
+            raise SystemExit("loopback needs --nsm 2: TX on machine 0, "
+                             "RX on machine 1")
+        period, got, err = baud_period(f_sys_hz, baud)
+        tx_prog, tx_ref = uart_tx_program(period, byte)
+        rx_ref, rx_prog = P_REF.STT_1PIN["uart_rx"](period)
+
+        tx_core = SttCore(
+            tx_prog, slots=[("tx", "pp")], ins=("in0", "in1"), period=period,
+            shift=tx_ref.shift, fill=tx_ref.fill, loadk=byte,
+            cload=tx_ref.cvals, sr_width=8, c2load=0, init_pins=[1],
+        )
+        # The RX reference declares slots=[] -- it drives nothing, it only
+        # reads in0 and pushes. But the hardware always has NSLOT slots per
+        # machine, and every pin's output select names SOME driver, so the pin
+        # the loop arrives on would be driven by whatever slot its select
+        # happens to hold. Giving machine 1 one OPEN-DRAIN slot that holds 1
+        # releases that pin: pin_oe = ~od_mask | ~pinv = 0. Without this an
+        # external jumper fights the chip's own driver.
+        rx_core = SttCore(
+            rx_prog, slots=[("rx_pullup", "od")], ins=("rx", "unused"),
+            period=period, shift=rx_ref.shift, fill=rx_ref.fill,
+            cload=rx_ref.cvals, sr_width=8, c2load=0, loadk=0,
             init_pins=[1],
         )
-        tx_slot, park_slot = 0, 2
-        info.update(baud_want=baud, baud_got=got, baud_err=err, byte=byte)
-    cload = info.get("cload", 0)
+        cores, progs = [tx_core, rx_core], [tx_prog, rx_prog]
+        info.update(baud_want=baud, baud_got=got, baud_err=err, byte=byte,
+                    tx_pin=LB_TX_PIN, rx_pin=LB_RX_PIN,
+                    dout_pin=LB_DOUT_PIN, stb_pin=LB_STB_PIN,
+                    din_pin=LB_DIN_PIN)
 
-    words = list(Format("single5", "grouped", tgt_bits=8).encode(prog)["packed"])
-    if len(words) > STT_ROWS:
-        raise SystemExit(f"{len(words)} rows, max {STT_ROWS}")
-    # SPEC section 10: the host MUST load all 32 rows. A short load leaves the
-    # CFGMEM chain rotated; the behavioural imem is padded identically so the
-    # FPGA and ASIC paths take the same stream.
-    padded = words + [0] * (STT_ROWS - len(words))
+        def plan_of(plan):
+            plan.drive(0, 0, LB_TX_PIN)                    # m0 slot 0 -> JA1
+            plan.drive(1, 0, LB_RX_PIN, od=True)           # release JB1
+            plan.read(1, 0, LB_RX_PIN)                     # m1 in0 <- JB1
+            plan.read(1, 1, LB_RX_PIN)
+            plan.read(0, 0, LB_RX_PIN)                     # unused by TX
+            plan.read(0, 1, LB_RX_PIN)
+            # machine 1 pushes, so SPEC 11.2 requires a host port; it is also
+            # the only way to see what RX received, since RX drives no pin.
+            plan.host_port(LB_DOUT_PIN, LB_STB_PIN, LB_DIN_PIN)
+            for pin in range(2, 16):
+                if pin != LB_RX_PIN:
+                    plan.drive(0, 2, pin)                  # quiet, select 2
+            return None
 
+    period = cores[0].P
     plan = PinPlan(nsm=nsm)
-    # Pin 0 is uo_out[0], Pmod JA pin 1.
-    plan.drive(0, tx_slot, 0)
-    if park_slot is not None:
-        # Every other pin is parked on a slot this program never writes, so it
-        # sits at its init value instead of carrying a copy of the signal. The
-        # select code for a parked pin is `park_slot`, which is NOT the value
-        # those fields reset to, so a chain that shifted the wrong content --
-        # all zeros, say -- shows up as traffic on fifteen pins that should be
-        # quiet. See the note on select codes in the report below.
-        for pin in range(1, 16):
-            plan.drive(0, park_slot, pin)
-    for m in range(nsm):
-        for i in range(2):
-            plan.read(m, i, 0)
-    # No host port: this program never touches `fifo`, `load` or `push`.
-    sel, nsel = plan.chain([prog] + [None] * (nsm - 1))
+    plan_of(plan)
+    sel, nsel = plan.chain(progs + [None] * (nsm - len(progs)))
 
-    one_imem = 0
-    for i, w in enumerate(padded):
-        one_imem |= w << (ROW_W * i)
     imem_n, cfg_n = ROW_W * STT_ROWS, CFG_BITS
-    one_cfg = config_word(core)
+    imem_bits = cfg_bits = 0
+    rows0 = None
+    for m in range(nsm):
+        if m < len(progs):
+            words, padded = pad_rows(progs[m])
+            if rows0 is None:
+                rows0 = words
+            one = 0
+            for i, w in enumerate(padded):
+                one |= w << (ROW_W * i)
+            imem_bits |= one << (m * imem_n)
+            cfg_bits |= config_word(cores[m]) << (m * cfg_n)
+        else:
+            cfg_bits |= config_word(cores[0]) << (m * cfg_n)
 
-    # One slice per machine, so the loader per-machine indexing is valid at any
-    # NSM. Machine 0 runs the blink program; the rest get an all-zero program,
-    # which decodes to always / WAIT / target 0 -- a self-loop at row 0 that
-    # performs no action and writes no pin. They still take a real
-    # configuration, because an all-zero config would mean P = 0.
-    imem_bits, cfg_bits = one_imem, one_cfg
-    for m in range(1, nsm):
-        cfg_bits |= one_cfg << (m * cfg_n)
-
-    return dict(core=core, prog=prog, words=words, padded=padded, cload=cload,
-                which=which, tx_slot=tx_slot, park_slot=park_slot, info=info,
-                imem_bits=imem_bits, imem_n=imem_n, one_imem=one_imem,
+    return dict(cores=cores, progs=progs, core=cores[0], prog=progs[0],
+                words=rows0, cload=info.get("cload", 0),
+                which=which, info=info,
+                imem_bits=imem_bits, imem_n=imem_n,
                 cfg_bits=cfg_bits, cfg_n=cfg_n, nsm=nsm,
                 sel_bits=sel, sel_n=nsel, period=period, f_sys=f_sys_hz)
 
@@ -218,14 +285,15 @@ def main():
     ap.add_argument("--fclk", type=float, default=125e6, help="board clock Hz")
     ap.add_argument("--div", type=int, default=8, help="stt_fpga_top DIV")
     ap.add_argument("--nsm", type=int, default=1)
-    ap.add_argument("--program", choices=("blink", "uart_tx"), default="blink",
+    ap.add_argument("--program", choices=("blink", "uart_tx", "loopback"),
+                    default="blink",
                     help="blink is the known-good fallback: if it stops "
                          "working, something regressed rather than the new "
                          "program being wrong")
     ap.add_argument("--baud", type=int, default=9600)
-    ap.add_argument("--byte", type=lambda x: int(x, 0), default=0x55,
-                    help="byte to transmit; 0x55 alternates 1010101 so a wrong "
-                         "baud gives visibly wrong characters, not plausible ones")
+    ap.add_argument("--byte", type=lambda x: int(x, 0), default=None,
+                    help="byte to transmit. Default 0x55 for uart_tx and 0x47 "
+                         "for loopback -- see the notes in the header")
     ap.add_argument("--seconds", type=float, default=0.5,
                     help="seconds per LED toggle")
     ap.add_argument("--period", type=int, default=TIMER_MAX,
@@ -234,7 +302,18 @@ def main():
     a = ap.parse_args()
 
     f_sys = a.fclk / a.div
-    d = build(a.nsm, f_sys, a.program, a.seconds, a.period, a.baud, a.byte)
+    # 0x55 is right for a TX-only test: it alternates, so baud error shows up
+    # as visibly wrong characters. It is the WRONG choice once RX is in the
+    # loop, because 0x55 bit-reversed is 0xAA, which is also ~0x55 -- so a
+    # bit-order fault and an inversion fault produce the SAME wrong byte and
+    # cannot be told apart. 0x47 has no such collision: reversed it is 0xE2,
+    # complemented 0xB8, shifted 0x8E or 0x23, all distinct from each other
+    # and from 0x00 and 0xFF. It also has a run of three identical bits, where
+    # baud error accumulates fastest, and it is ASCII 'G', so the same stream
+    # is still readable on a terminal.
+    byte = a.byte if a.byte is not None else (0x47 if a.program == "loopback"
+                                              else 0x55)
+    d = build(a.nsm, f_sys, a.program, a.seconds, a.period, a.baud, byte)
     i = d["info"]
 
     if a.program == "blink":
@@ -243,6 +322,19 @@ def main():
                 f"//   counter 1 reload   {d['cload']} timer ticks\n"
                 f"//   LED toggles every  {i['toggle_s']:.3f} s"
                 f"  -> {1 / (2 * i['toggle_s']):.3f} Hz blink")
+    elif a.program == "loopback":
+        what = (f"//   bit period P       {d['period']} cycles = "
+                f"{d['period'] / f_sys * 1e6:.3f} us\n"
+                f"//   baud achieved      {i['baud_got']:.2f}"
+                f"  ({i['baud_err'] * 100:+.4f}%)\n"
+                f"//   byte              0x{i['byte']:02X}, LSB first\n"
+                f"//   machine 0          uart_tx  -> pin {i['tx_pin']} "
+                f"(uo_out[{i['tx_pin']}], JA{i['tx_pin'] + 1})\n"
+                f"//   machine 1          uart_rx  <- pin {i['rx_pin']} "
+                f"(uio[{i['rx_pin'] - 8}], JB{i['rx_pin'] - 7}), released "
+                f"open-drain\n"
+                f"//   host port          dout pin {i['dout_pin']}, "
+                f"stb pin {i['stb_pin']}, din pin {i['din_pin']}")
     else:
         what = (f"//   bit period P       {d['period']} cycles = "
                 f"{d['period'] / f_sys * 1e6:.3f} us\n"
@@ -275,7 +367,8 @@ def main():
         # re-typing it. A hand-copied timing constant that disagrees with the
         # ROM is the same class of bug as a hand-copied bit stream.
         f"localparam integer STT_ROM_PERIOD = {d['period']};",
-        f"localparam integer STT_ROM_IS_UART = {1 if a.program == 'uart_tx' else 0};",
+        f"localparam integer STT_ROM_IS_UART = {1 if a.program in ('uart_tx', 'loopback') else 0};",
+        f"localparam integer STT_ROM_IS_LOOPBACK = {1 if a.program == 'loopback' else 0};",
         f"localparam [7:0]   STT_ROM_BYTE   = 8'h{i.get('byte', 0):02X};",
         f"localparam integer STT_ROM_IMEM_N = {d['imem_n']};",
         f"localparam integer STT_ROM_CFG_N  = {d['cfg_n']};",
@@ -303,17 +396,28 @@ def main():
     if a.program == "blink":
         print(f"  P              {d['period']} = {d['period'] / f_sys * 1e3:.3f} ms")
         print(f"  cload          {d['cload']} ticks -> toggle every {real:.3f} s")
+    elif a.program == "loopback":
+        print(f"  P              {d['period']} cycles = "
+              f"{d['period'] / f_sys * 1e6:.3f} us per bit")
+        print(f"  baud           {i['baud_want']} requested, "
+              f"{i['baud_got']:.2f} achieved ({i['baud_err'] * 100:+.4f}%)")
+        print(f"  byte           0x{i['byte']:02X} "
+              f"(reversed 0x{int(format(i['byte'], '08b')[::-1], 2):02X}, "
+              f"complement 0x{~i['byte'] & 0xFF:02X})")
+        print(f"  machine 0      uart_tx -> pin {i['tx_pin']}")
+        print(f"  machine 1      uart_rx <- pin {i['rx_pin']} (open drain, released)")
+        print(f"  host port      dout {i['dout_pin']}, stb {i['stb_pin']}, "
+              f"din {i['din_pin']}")
     else:
         print(f"  P              {d['period']} cycles = "
               f"{d['period'] / f_sys * 1e6:.3f} us per bit")
         print(f"  baud           {i['baud_want']} requested, "
               f"{i['baud_got']:.2f} achieved ({i['baud_err'] * 100:+.4f}%)")
         print(f"  byte           0x{i['byte']:02X}, LSB first, continuous")
-        print(f"  TX             slot {d['tx_slot']} -> pin 0 (uo_out[0], JA1), "
-              f"select code {d['tx_slot']}")
-        print(f"  parked         pins 1..15 -> slot {d['park_slot']}, "
-              f"select code {d['park_slot']}")
-    print(f"  first 3 words  {[hex(w) for w in d['padded'][:3]]}")
+        print(f"  TX             slot 0 -> pin {LB_TX_PIN} "
+              f"(uo_out[{LB_TX_PIN}], JA{LB_TX_PIN + 1})")
+        print( "  parked         pins 1..15 -> machine 0 slot 2, select code 2")
+    print(f"  first 3 words  {[hex(w) for w in d['words'][:3]]}")
 
 
 if __name__ == "__main__":

@@ -25,7 +25,20 @@
 
 `default_nettype none
 
-module stt_fpga_top (
+module stt_fpga_top #(
+    // Where machine 1's RX pin gets its value, for the loopback ROM.
+    //   1 = internally, straight from the TX pin inside the FPGA. Removes
+    //       wiring as a variable for first bring-up.
+    //   0 = from the physical uio[0] pin, so the loop leaves the chip through
+    //       a jumper between Pmod JA pin 1 and Pmod JB pin 1. This is the
+    //       real test: it goes through the actual IOBUFs and board traces.
+    // Override at synthesis with: synth_design -generic LOOPBACK_INTERNAL=0
+    //
+    // Either way the chip RELEASES uio[0]: the loopback ROM parks that pin on
+    // an open-drain slot holding 1, so pin_oe is 0 there. Without that the
+    // chip would drive the same net the jumper drives.
+    parameter integer LOOPBACK_INTERNAL = 1
+) (
     input  wire        clk,         // H16, 125 MHz
     input  wire        btn_raw,     // D20, HIGH when pressed
     output wire        led_status,  // G17, green LED
@@ -36,6 +49,8 @@ module stt_fpga_top (
     // -----------------------------------------------------------------------
     // Clocking
     // -----------------------------------------------------------------------
+
+    `include "stt_rom.vh"
 
     wire clk_sys;
     wire locked;
@@ -87,7 +102,14 @@ module stt_fpga_top (
     wire [2:0] ldr_sm_sel;
     wire       ldr_done;
 
-    assign uio_in = ldr_done ? uio : {ldr_sm_sel, uio[4:0]};
+    // The loopback source for uio_in[0], which the loopback ROM assigns as
+    // machine 1's in0. A machine cannot read back a uo_out pin -- the iomux
+    // input map is {uio_in, ui_in}, so pin index p < 8 reads ui_in[p], a
+    // different physical pin -- which is why the loop has to arrive on uio.
+    wire lb_bit = (LOOPBACK_INTERNAL != 0) ? uo_out[0] : uio[0];
+    wire [7:0] uio_pins = {uio[7:1], lb_bit};
+
+    assign uio_in = ldr_done ? uio_pins : {ldr_sm_sel, uio_pins[4:0]};
 
     // -----------------------------------------------------------------------
     // ui_in -- driven by the on-chip loader, not by pins
@@ -101,15 +123,53 @@ module stt_fpga_top (
     // host sees the flag SPEC section 10 requires it to honour.
 
     wire [7:0] ui_in;
+    wire [7:0] ldr_ui;
 
     stt_loader u_loader (
         .clk    (clk_sys),
         .rst_n  (rst_n),
         .busy   (uo_out[0]),
-        .ui_in  (ui_in),
+        .ui_in  (ldr_ui),
         .sm_sel (ldr_sm_sel),
         .done   (ldr_done)
     );
+
+    // -----------------------------------------------------------------------
+    // Host port reader (loopback ROM only)
+    // -----------------------------------------------------------------------
+    // The UART RX reference program drives no pins -- it pushes -- so the only
+    // way to see what it received is to read its RX FIFO over the SPEC 11.2
+    // host byte port. The loopback pin plan puts that port on
+    // dout = uo_out[1], stb = ui_in[7], din = ui_in[6].
+    //
+    // Harmless under the blink and uart_tx ROMs: those assign no host port, so
+    // host_en is 0, the chip ignores the strobe, and every reply reads back
+    // rx_ne = 0.
+
+    wire       hr_stb, hr_din;
+    wire [7:0] hr_byte;
+    wire       hr_valid;
+    wire [3:0] hr_status;
+    wire [31:0] hr_good, hr_bad;
+
+    stt_hostread u_hostread (
+        .clk         (clk_sys),
+        .rst_n       (rst_n),
+        .start       (ldr_done),
+        .sel         (3'd1),                // machine 1 runs uart_rx
+        .expect_byte (STT_ROM_BYTE),
+        .dout        (uo_out[1]),
+        .stb         (hr_stb),
+        .din         (hr_din),
+        .last_byte   (hr_byte),
+        .last_valid  (hr_valid),
+        .last_status (hr_status),
+        .good_count  (hr_good),
+        .bad_count   (hr_bad)
+    );
+
+    // The loader owns ui_in until it is done; the reader owns it afterwards.
+    assign ui_in = ldr_done ? {hr_stb, hr_din, 6'b0} : ldr_ui;
 
     // -----------------------------------------------------------------------
     // The design
@@ -134,7 +194,17 @@ module stt_fpga_top (
     // blinks. If it blinks, the loader, the imem write path, the machine and
     // the pin path all work -- that is the whole milestone.
 
-    assign led_status = uo_out[0];
+    // Under the loopback ROM the LED reports RECEPTION, not the TX waveform:
+    // it toggles once per 256 correctly received bytes, so at 9600 baud with a
+    // byte every 11 bit times it blinks at a couple of Hz.
+    //
+    //   blinking  -> bytes are arriving and every one matches
+    //   dark      -> nothing is being received at all
+    //   solid     -> reception stopped, or bytes are arriving wrong
+    //
+    // Under blink and uart_tx there is no host port, so hr_good never moves
+    // and the LED falls back to mirroring uo_out[0] as before.
+    assign led_status = (STT_ROM_IS_LOOPBACK != 0) ? hr_good[8] : uo_out[0];
 
 endmodule
 
