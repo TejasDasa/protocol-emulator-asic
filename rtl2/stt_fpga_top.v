@@ -148,17 +148,29 @@ module stt_fpga_top #(
 
     wire       hr_stb, hr_din;
     wire [7:0] hr_byte;
+    localparam integer HOST_WREN_I = STT_ROM_HOST_WREN;
     wire       hr_valid;
     wire [3:0] hr_status;
     wire [31:0] hr_good, hr_bad;
 
-    stt_hostread u_hostread (
+    // Everything about what to write, what to expect and where the data-out
+    // pin is comes from the ROM, so switching protocol is a regeneration and
+    // not an RTL edit. usb_ls_token_tx needs the write path: it takes three
+    // DIFFERENT bytes through `load`, which `loadk` cannot supply.
+    stt_hostread #(
+        .NW (STT_ROM_HOST_NW),
+        .NR (STT_ROM_HOST_NR)
+    ) u_hostread (
         .clk         (clk_sys),
         .rst_n       (rst_n),
         .start       (ldr_done),
-        .sel         (3'd1),                // machine 1 runs uart_rx
-        .expect_byte (STT_ROM_BYTE),
-        .dout        (uo_out[1]),
+        .wr_en       (HOST_WREN_I[0]),
+        .wr_sel      (STT_ROM_HOST_WSEL),
+        .wr_seq      (STT_ROM_HOST_WSEQ),
+        .rd_sel      (STT_ROM_HOST_RSEL),
+        .rd_seq      (STT_ROM_HOST_RSEQ),
+        .wr_gap      (STT_ROM_HOST_WGAP[15:0]),
+        .dout        (uo_out[STT_ROM_HOST_DOUT]),
         .stb         (hr_stb),
         .din         (hr_din),
         .last_byte   (hr_byte),
@@ -204,7 +216,10 @@ module stt_fpga_top #(
     //
     // Under blink and uart_tx there is no host port, so hr_good never moves
     // and the LED falls back to mirroring uo_out[0] as before.
-    assign led_status = (STT_ROM_IS_LOOPBACK != 0) ? hr_good[8] : uo_out[0];
+    // The bit is chosen by the generator from the protocol's byte rate so the
+    // blink lands near 1.5 Hz whether bytes arrive at 900 a second or 190,000.
+    assign led_status = (STT_ROM_IS_LOOPBACK != 0) ? hr_good[STT_ROM_LED_BIT]
+                                                   : uo_out[0];
 
 endmodule
 

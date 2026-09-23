@@ -172,3 +172,62 @@ transmitter already uses: `c2load = 6`, `c2dec` on each decoded 1, `c2z` to
 find the stuffed cell. The §9 `bit_stuffer` is not involved, for the reasons
 above — so this program is **not** a first exercise of that unit, and not of
 `crc_lfsr16` either.
+
+---
+
+# On the board
+
+FPGA bring-up infrastructure, not part of the ASIC submission.
+
+    python3 scripts/gen_fpga_rom.py --program usb_loopback --nsm 2 --div 8 \
+        -o rtl2/stt_rom.vh
+
+Machine 0 runs `usb_ls_token_tx` unchanged, machine 1 runs `stt_usb_rx`. Both
+routes simulate clean: **8 bytes across two packets, every one correct, on the
+internal route and through the external jumper.**
+
+| pin | |
+|---|---|
+| `uo_out[0]`, JA1 | **D+**, and the loop source |
+| `uo_out[1]`, JA2 | **D−** — observable, not looped |
+| `uo_out[2]`, JA3 | host port data out |
+| `uio[0]`, JB1 | where D+ comes back. Released: machine 1 slot 1 is open drain holding 1 |
+| `uio[1]`, JB2 | the decoded-bit loopback |
+
+**The decoded-bit loopback needs no wire.** A `uio` pin is bidirectional and
+its input path sees what the chip drives, so a machine reads its own output
+back through the pad. The simulation asserts both halves of that: `uio_oe[0]`
+is 0 so a jumper cannot be fought, and `uio_oe[1]` is 1 so the self-loopback
+has something to read. This also retires the footnote in the option table
+above — the ASIC does **not** need an external strap for NRZI, only a `uio`
+pin.
+
+**The transmitter had to be fed over the host port**, which the UART loopback
+never exercised. `usb_ls_token_tx` takes three *different* bytes through
+`load`, and `loadk` supplies one constant, so `stt_hostread` grew the §11.2
+**write** path: it alternates a write frame to machine 0 with a read frame
+from machine 1, retrying a byte whenever the reply says `tx_full`.
+
+## The idle gap, found twice
+
+The first FPGA run failed in exactly the shape the model had: **packet 1
+byte-exact, everything after it garbage.** The cause was the same and the
+mechanism was the same — the host driver kept machine 0's FIFO fed, so packets
+went out back to back with one idle bit, and the receiver's end-of-packet rule
+never fired.
+
+It is worth recording that the second sighting was predicted by the first. The
+fix is in the driver, not the receiver: after each full write sequence it goes
+quiet for `16 × P` clocks, still issuing read frames so the RX FIFO drains but
+writing nothing, so the line idles and the run of ones builds. `STT_ROM_HOST_WGAP`
+carries that number, computed by the generator.
+
+## What the simulation checks that a waveform would not
+
+- **the pair moves together** — D+ and D− equal is flagged unless it is the SE0
+  the transmitter emits deliberately. A pair-slot bug driving only one half
+  would still make plausible single-ended traffic;
+- **SE0 actually occurs** (40 cycles of it), so the pair really does reach the
+  non-differential state;
+- **the host port agrees with the push** — `good = 8, bad = 0` read back
+  independently through §11.2.

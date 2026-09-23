@@ -1448,6 +1448,43 @@ program.
 Everything this specification does not settle. Each entry says what is missing
 and where the evidence stops.
 
+### 16.0 The one structural limit, stated once
+
+**The ISA can test state and it can move data. It cannot turn a test result
+into data.** Every bit that reaches the shift register comes from the TX FIFO
+(`load`), a configured constant (`loadk`), the CRC (`loadcrc`), zero (`clr`)
+or the fill bit (`shift`) — and `fill` is per-machine *configuration*, one of
+constant 0, constant 1 or synchronized input 0 (§2). `in_s[0]` through `fill`
+is the only path from any pin into data. Every other use of an input is a
+test, which steers control flow and deposits nothing.
+
+This is not a defect list; it is one property, and three separate costs that
+were each recorded as their own puzzle turn out to be the same thing:
+
+| where it showed up | what it cost |
+|---|---|
+| **CAN destuffing** | There is no "same as the previous bit" test, so a receiver must fork on polarity and carry the run length in control flow: **36 rows**, which is why §9's `bit_stuffer` exists at all (`docs/writeup.md` §3) |
+| **USB NRZI** | The decoded bit is `NOT(current XOR previous)`, a computed value, so it cannot enter the shift register at all. The receiver drives it on a pin and reads it back through the §8.3 synchronizer — **half the program is the line-state fork, and three rows per copy are pure round-trip latency** (`docs/usb-rx-analysis.md`) |
+| **USB receive bit rate** | Those round-trip rows put a floor under the bit cell: **nine clocks per bit**, measured, below which `shift` takes the previous bit |
+
+The general shape: **a protocol that needs a decision about one bit to become
+part of a byte pays for it in rows, and if the decision depends on history it
+pays twice** — once to fork the control flow, once to get the answer back into
+the datapath.
+
+It also says where the wider units of §9 earn their place, which is narrower
+than "stuffing" in general. `usb_ls_token_tx` stuffs with no unit at all and
+the matching receiver **destuffs with no extra rows**, because USB's rule is a
+run of *ones* and the `c2` countdown already tracks it. CAN is expensive
+because its rule is *any* identical run, which needs the polarity the ISA
+cannot hand to the datapath. **The stuffer's value is in-loop run detection on
+received data, not stuffing.**
+
+The escape, where one is needed, is a pin: drive the computed bit out and read
+it back. That works on any `uio` pin without an external wire, since the pad
+reads back what the chip drives, and it costs one pin, two cycles of
+synchronizer latency, and the rows to wait them out.
+
 ### 16.1 Not specified — an implementation must choose, and record its choice
 
 | item | what is missing | where |

@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.join(ROOT, "rtl2", "tb"))
 
 from lockstep import CFG_BITS, config_word          # noqa: E402
 from pinmap import PinPlan                          # noqa: E402
+from devices import crc5_usb, bits_lsb              # noqa: E402
 from rowformat import Format                        # noqa: E402
 from stt import Row, SttCore, SttProgram            # noqa: E402
 import programs as P_REF                            # noqa: E402
@@ -130,6 +131,19 @@ LB_DOUT_PIN  = 1    # uo_out[1], Pmod JA pin 2 -- host port data out
 LB_STB_PIN   = 7    # ui_in[7]  -- host port strobe
 LB_DIN_PIN   = 6    # ui_in[6]  -- host port data in
 
+# USB loopback. The transmitter's pair writes two slots at once, so D+ and D-
+# take two pins; only D+ is looped back, because the receiver has two inputs
+# and the second is spent on the decoded-bit loopback NRZI needs.
+UB_DP_PIN    = 0    # uo_out[0], JA1 -- D+, the loop source
+UB_DM_PIN    = 1    # uo_out[1], JA2 -- D-, observable but not looped
+UB_DOUT_PIN  = 2    # uo_out[2], JA3 -- host port data out
+UB_ARRIVE    = 8    # uio[0],    JB1 -- where D+ comes back
+UB_DEC_PIN   = 9    # uio[1],    JB2 -- the decoded-bit loopback
+#
+# UB_DEC_PIN needs no wire. A uio pin is bidirectional and its input path sees
+# what the chip drives, so a machine can read its own output back through the
+# pad. That is the whole of the self-loopback on this side.
+
 
 def pad_rows(prog):
     words = list(Format("single5", "grouped", tgt_bits=8).encode(prog)["packed"])
@@ -141,7 +155,8 @@ def pad_rows(prog):
     return words, words + [0] * (STT_ROWS - len(words))
 
 
-def build(nsm, f_sys_hz, which, seconds, period, baud, byte):
+def build(nsm, f_sys_hz, which, seconds, period, baud, byte,
+          usb_period=10, usb_token=(0x2D, 0x3A)):
     """Returns everything the ROM and the report need.
 
     `cores` and `progs` are per machine, index 0 first. A machine with no
@@ -199,7 +214,59 @@ def build(nsm, f_sys_hz, which, seconds, period, baud, byte):
                     plan.read(m, i, 0)
             return None
 
+    elif which == "usb_loopback":
+        if nsm < 2:
+            raise SystemExit("usb_loopback needs --nsm 2")
+        period = usb_period
+        tx_core_ref, tx_prog = P_REF.STT_1PIN["usb"](period)
+        rx_core_ref, rx_prog = P_REF.stt_usb_rx(period)
+
+        # The transmitter unchanged, but with a second slot that releases the
+        # pin D+ comes back on, so an external jumper does not fight the chip.
+        tx_core = SttCore(
+            tx_prog, slots=[("dp", "pp"), ("dm", "pp")], period=period,
+            shift=tx_core_ref.shift, fill=tx_core_ref.fill,
+            cload=tx_core_ref.cvals, c2load=tx_core_ref.c2val,
+            loadk=tx_core_ref.k, sr_width=8, init_pins=[0, 1],
+        )
+        rx_core = SttCore(
+            rx_prog, slots=[("dec", "pp"), ("release", "od")],
+            ins=["dec", "dp"], period=period,
+            shift=rx_core_ref.shift, fill=rx_core_ref.fill,
+            cload=rx_core_ref.cvals, c2load=rx_core_ref.c2val,
+            sr_width=8, loadk=0,
+            # slot 1 is open drain holding 1, so the pin D+ arrives on is
+            # released; slot 0 drives the decoded bit and is read back.
+            init_pins=[0, 1],
+        )
+        cores, progs = [tx_core, rx_core], [tx_prog, rx_prog]
+        pid, field = usb_token
+        crc = crc5_usb(bits_lsb(field, 11))
+        wseq = [pid, field & 0xFF, field >> 8]
+        rseq = [0x80, pid, field & 0xFF, ((field >> 8) & 0x7) | (crc << 3)]
+        info.update(period=period, pid=pid, field=field, crc5=crc,
+                    wseq=wseq, rseq=rseq, bitrate=f_sys_hz / period,
+                    host=dict(wr_en=1, wsel=0, rsel=1,
+                              dout_pin=UB_DOUT_PIN, stb_pin=LB_STB_PIN,
+                              din_pin=LB_DIN_PIN))
+
+        def plan_of(plan):
+            plan.drive(0, 0, UB_DP_PIN)                    # D+
+            plan.drive(0, 1, UB_DM_PIN)                    # D-
+            plan.drive(1, 1, UB_ARRIVE, od=True)           # release the arrival
+            plan.drive(1, 0, UB_DEC_PIN)                   # decoded-bit loopback
+            plan.read(1, 0, UB_DEC_PIN)                    # in0 = it, read back
+            plan.read(1, 1, UB_ARRIVE)                     # in1 = D+
+            plan.read(0, 0, UB_ARRIVE)
+            plan.read(0, 1, UB_ARRIVE)
+            plan.host_port(UB_DOUT_PIN, LB_STB_PIN, LB_DIN_PIN)
+            for pin in range(3, 16):
+                if pin not in (UB_ARRIVE, UB_DEC_PIN):
+                    plan.drive(0, 2, pin)
+            return None
+
     else:                                 # loopback
+
         if nsm < 2:
             raise SystemExit("loopback needs --nsm 2: TX on machine 0, "
                              "RX on machine 1")
@@ -275,6 +342,14 @@ def build(nsm, f_sys_hz, which, seconds, period, baud, byte):
                 sel_bits=sel, sel_n=nsel, period=period, f_sys=f_sys_hz)
 
 
+def seq_word(seq):
+    """Bytes packed so index 0 is the low byte, which is how the RTL slices."""
+    v = 0
+    for k, b in enumerate(seq):
+        v |= (b & 0xFF) << (8 * k)
+    return v
+
+
 def vh(b, name, nbits):
     """A Verilog localparam holding `nbits` of `b`, LSB presented first."""
     return f"localparam [{nbits - 1}:0] {name} = {nbits}'b{b:0{nbits}b};"
@@ -285,12 +360,18 @@ def main():
     ap.add_argument("--fclk", type=float, default=125e6, help="board clock Hz")
     ap.add_argument("--div", type=int, default=8, help="stt_fpga_top DIV")
     ap.add_argument("--nsm", type=int, default=1)
-    ap.add_argument("--program", choices=("blink", "uart_tx", "loopback"),
+    ap.add_argument("--program",
+                    choices=("blink", "uart_tx", "loopback", "usb_loopback"),
                     default="blink",
                     help="blink is the known-good fallback: if it stops "
                          "working, something regressed rather than the new "
                          "program being wrong")
     ap.add_argument("--baud", type=int, default=9600)
+    ap.add_argument("--usb-period", type=int, default=10,
+                    help="clocks per USB bit cell. The receiver needs at "
+                         "least 9: it drives each decoded bit on a pin and "
+                         "reads it back through the two-cycle synchronizer "
+                         "before `shift` can take it.")
     ap.add_argument("--byte", type=lambda x: int(x, 0), default=None,
                     help="byte to transmit. Default 0x55 for uart_tx and 0x47 "
                          "for loopback -- see the notes in the header")
@@ -313,7 +394,8 @@ def main():
     # is still readable on a terminal.
     byte = a.byte if a.byte is not None else (0x47 if a.program == "loopback"
                                               else 0x55)
-    d = build(a.nsm, f_sys, a.program, a.seconds, a.period, a.baud, byte)
+    d = build(a.nsm, f_sys, a.program, a.seconds, a.period, a.baud, byte,
+              usb_period=a.usb_period)
     i = d["info"]
 
     if a.program == "blink":
@@ -322,6 +404,19 @@ def main():
                 f"//   counter 1 reload   {d['cload']} timer ticks\n"
                 f"//   LED toggles every  {i['toggle_s']:.3f} s"
                 f"  -> {1 / (2 * i['toggle_s']):.3f} Hz blink")
+    elif a.program == "usb_loopback":
+        what = (f"//   bit cell P         {d['period']} cycles = "
+                f"{i['bitrate'] / 1e6:.4f} Mbit/s\n"
+                f"//   token              PID 0x{i['pid']:02X}, "
+                f"field 0x{i['field']:03X}, CRC5 0x{i['crc5']:02X}\n"
+                f"//   machine 0          usb_ls_token_tx, D+ pin {UB_DP_PIN} "
+                f"(JA1), D- pin {UB_DM_PIN} (JA2)\n"
+                f"//   machine 1          usb_rx, D+ arrives pin {UB_ARRIVE} "
+                f"(JB1), decoded bit loops on pin {UB_DEC_PIN} (JB2)\n"
+                f"//   host writes        "
+                f"{[hex(x) for x in i['wseq']]} -> machine 0\n"
+                f"//   host expects       "
+                f"{[hex(x) for x in i['rseq']]} <- machine 1")
     elif a.program == "loopback":
         what = (f"//   bit period P       {d['period']} cycles = "
                 f"{d['period'] / f_sys * 1e6:.3f} us\n"
@@ -360,6 +455,29 @@ def main():
 // rowenc.pack and the staging register in stt_imem.v agree on. Bit i of
 // each vector is presented on cycle i.
 """
+    # Host-port driver settings, and how fast the LED should blink. The LED
+    # toggles once per 2^LED_BIT correctly received bytes, so the bit is chosen
+    # from the byte rate to land near 1.5 Hz whatever the protocol.
+    host = i.get("host", dict(wr_en=0, wsel=0, rsel=1,
+                              dout_pin=LB_DOUT_PIN, stb_pin=LB_STB_PIN,
+                              din_pin=LB_DIN_PIN))
+    wseq = i.get("wseq", [0])
+    rseq = i.get("rseq", [i.get("byte", 0)])
+    if a.program == "usb_loopback":
+        byte_rate = i["bitrate"] / 33 * 4        # 4 bytes per 33-bit packet
+    elif a.program == "loopback":
+        byte_rate = f_sys / d["period"] / 11     # one byte per 11 bit times
+    else:
+        byte_rate = 0
+    # Idle clocks to leave after each packet. The USB receiver needs a run of
+    # ones longer than stuffing allows to see end of packet, which takes more
+    # than seven bit times; 16 is margin.
+    wgap = 16 * d['period'] if a.program == 'usb_loopback' else 0
+    led_bit = 8
+    if byte_rate > 0:
+        import math
+        led_bit = max(1, min(31, round(math.log2(max(1.0, byte_rate / 3.0)))))
+
     body = "\n".join([
         head,
         f"localparam integer STT_ROM_NSM   = {a.nsm};",
@@ -368,7 +486,21 @@ def main():
         # ROM is the same class of bug as a hand-copied bit stream.
         f"localparam integer STT_ROM_PERIOD = {d['period']};",
         f"localparam integer STT_ROM_IS_UART = {1 if a.program in ('uart_tx', 'loopback') else 0};",
-        f"localparam integer STT_ROM_IS_LOOPBACK = {1 if a.program == 'loopback' else 0};",
+        f"localparam integer STT_ROM_IS_LOOPBACK = {1 if a.program in ('loopback', 'usb_loopback') else 0};",
+        f"localparam integer STT_ROM_IS_USB = {1 if a.program == 'usb_loopback' else 0};",
+        # What the host-port driver should do. A program with no host port in
+        # its pin plan simply reads rx_ne = 0 for ever, so these are harmless
+        # when unused.
+        f"localparam integer STT_ROM_HOST_WREN = {host['wr_en']};",
+        f"localparam [2:0]   STT_ROM_HOST_WSEL = 3'd{host['wsel']};",
+        f"localparam [2:0]   STT_ROM_HOST_RSEL = 3'd{host['rsel']};",
+        f"localparam integer STT_ROM_HOST_NW   = {len(wseq)};",
+        f"localparam integer STT_ROM_HOST_NR   = {len(rseq)};",
+        vh(seq_word(wseq), "STT_ROM_HOST_WSEQ", 8 * len(wseq)),
+        vh(seq_word(rseq), "STT_ROM_HOST_RSEQ", 8 * len(rseq)),
+        f"localparam integer STT_ROM_HOST_DOUT = {host['dout_pin']};",
+        f"localparam [15:0]  STT_ROM_HOST_WGAP = 16'd{wgap};",
+        f"localparam integer STT_ROM_LED_BIT   = {led_bit};",
         f"localparam [7:0]   STT_ROM_BYTE   = 8'h{i.get('byte', 0):02X};",
         f"localparam integer STT_ROM_IMEM_N = {d['imem_n']};",
         f"localparam integer STT_ROM_CFG_N  = {d['cfg_n']};",
@@ -396,6 +528,15 @@ def main():
     if a.program == "blink":
         print(f"  P              {d['period']} = {d['period'] / f_sys * 1e3:.3f} ms")
         print(f"  cload          {d['cload']} ticks -> toggle every {real:.3f} s")
+    elif a.program == "usb_loopback":
+        print(f"  P              {d['period']} cycles per bit "
+              f"({i['bitrate'] / 1e6:.4f} Mbit/s)")
+        print(f"  token          PID 0x{i['pid']:02X}, field 0x{i['field']:03X}, "
+              f"CRC5 0x{i['crc5']:02X}")
+        print(f"  host writes    {[hex(x) for x in i['wseq']]} -> machine 0")
+        print(f"  host expects   {[hex(x) for x in i['rseq']]} <- machine 1")
+        print(f"  D+ pin {UB_DP_PIN} (JA1), D- pin {UB_DM_PIN} (JA2), "
+              f"arrives pin {UB_ARRIVE} (JB1), decoded pin {UB_DEC_PIN} (JB2)")
     elif a.program == "loopback":
         print(f"  P              {d['period']} cycles = "
               f"{d['period'] / f_sys * 1e6:.3f} us per bit")
