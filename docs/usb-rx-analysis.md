@@ -183,8 +183,21 @@ FPGA bring-up infrastructure, not part of the ASIC submission.
         -o rtl2/stt_rom.vh
 
 Machine 0 runs `usb_ls_token_tx` unchanged, machine 1 runs `stt_usb_rx`. Both
-routes simulate clean: **8 bytes across two packets, every one correct, on the
-internal route and through the external jumper.**
+routes simulate clean -- 8 bytes across two packets, every one correct -- and
+**both then ran on hardware**, internally routed and again through a jumper
+across real pads.
+
+That makes this the first physical exercise of the pair slot, of NRZI in both
+directions, of the self-loopback through a `uio` pin, and of the §11.2 host
+write path. It does **not** extend to `crc_lfsr16` or `bit_stuffer`, which
+still have not run on anything physical (§16.3): the token uses the 5-bit
+per-machine CRC and the receiver destuffs with `c2`.
+
+The ASIC has not been fabricated, so "hardware" here means the FPGA. What the
+result establishes about the ASIC is narrower and worth separating: the
+self-loopback needs a `uio` pin and not a board wire, so the receiver is
+something the taped-out part could run rather than an arrangement that only
+exists on a dev board.
 
 | pin | |
 |---|---|
@@ -216,7 +229,10 @@ mechanism was the same — the host driver kept machine 0's FIFO fed, so packets
 went out back to back with one idle bit, and the receiver's end-of-packet rule
 never fired.
 
-It is worth recording that the second sighting was predicted by the first. The
+It is worth recording that the second sighting was predicted by the first, and
+that the gap requirement has now been **measured twice on different plumbing**
+rather than inferred once -- which is the difference between "the model says"
+and a property of the receiver. The
 fix is in the driver, not the receiver: after each full write sequence it goes
 quiet for `16 × P` clocks, still issuing read frames so the RX FIFO drains but
 writing nothing, so the line idles and the run of ones builds. `STT_ROM_HOST_WGAP`
