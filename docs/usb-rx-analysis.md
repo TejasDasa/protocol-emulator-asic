@@ -110,3 +110,65 @@ A is the only one that leaves the ISA able to express NRZI receive on its own,
 and the free `fill` code is the natural place for it — but what that fourth
 source should be is a design decision, not a transcription, and it is a change
 to a normative document.
+
+---
+
+# The receiver, as built
+
+Written against the self-loopback route. **24 rows of 32**, working at bit
+periods **9 to 32 cycles with no gaps**, verified by
+`isa_bench/usb_rx_check.py` (`make check-usb-rx`, inside `make check`).
+
+The stimulus is the reference transmitter itself — `stt_usb_1pin` drives dp/dm
+and `stt_usb_rx` reads dp, machine to machine in one `World`, exactly as the
+FPGA wires them. Nothing is a hand-built waveform, so a decoder that agrees
+here agrees with the program that already passes its own benchmark. All four
+`run_usb` packets decode, including `(0x69, 0x7FF)`, whose all-ones field is
+what forces bit stuffing.
+
+| received | field |
+|---|---|
+| byte 0 | SYNC, `0x80` |
+| byte 1 | PID |
+| byte 2 | ADDR and the low bit of ENDP |
+| byte 3 | the top three bits of ENDP, then CRC5 |
+
+## Three things it cannot do, and why
+
+**It does not check CRC5 itself.** The ISA has no test that reads the CRC
+register — the test codes are `always`, `c2z`, `cz`, `fifo`, `in0h`, `in0l`,
+`in1h`, `in1l`, `srbit`, `tmr`, `stall`. `loadcrc` moves the CRC into the
+shift register where five `srbit` tests could walk it, but that is ten-odd
+rows to reach a verdict the host gets for free from byte 3. The CRC arrives as
+data and is checked by the caller.
+
+**It cannot see SE0.** End of packet is both halves low, and the receiver has
+two inputs with both spent: one on D+, one on the decoded-bit loopback that
+NRZI needs. So D− is invisible and SE0 cannot be told from a differential 0.
+
+**Which means it needs an idle gap between packets.** It ends a packet by
+noticing the line has gone idle, read as a run of ones longer than stuffing
+permits — seven. The transmitter emits SE0, SE0, J and then starts the next
+packet immediately, so back to back there is **one** idle bit and the run
+never builds; the receiver runs the two packets together. `IDLE_BITS = 12` in
+the checker is the gap a host must leave. Any real host leaves far more, but
+it is a requirement of this receiver and not of USB, so it is stated rather
+than assumed.
+
+## What it costs, structurally
+
+Half the program is the line-state duplication: NRZI decodes against the
+previous line state, and the row pointer is the only place to keep one bit, so
+the sample/drive/shift machinery exists twice, once for J and once for K. That
+is eleven rows per copy.
+
+Three of those rows per copy are slack — `V`, `W`, `X` — doing nothing but
+waiting for the decoded bit to come back through the §8.3 synchronizer before
+`shift` takes it. **That is the price of the loopback showing up as rows**, and
+it is also what puts the floor at nine cycles per bit.
+
+Destuffing is four codes and no extra rows, using the `c2` countdown the
+transmitter already uses: `c2load = 6`, `c2dec` on each decoded 1, `c2z` to
+find the stuffed cell. The §9 `bit_stuffer` is not involved, for the reasons
+above — so this program is **not** a first exercise of that unit, and not of
+`crc_lfsr16` either.

@@ -483,7 +483,81 @@ def stt_spi_1pin(P):
     return core, prog
 
 
+def stt_usb_rx(P):
+    """Receive a USB LS token: SYNC, NRZI, destuffing, fields to the RX FIFO.
+
+    NRZI decoding needs a bit the program WORKED OUT to enter the shift
+    register, and the ISA has no way to do that -- `shift` inserts the fill
+    bit, and fill is per-machine configuration, not a row field
+    (docs/usb-rx-analysis.md). So the machine drives each decoded bit on slot 0
+    and reads it back on in0 through the SPEC 8.3 synchronizer, and `fill` is
+    in0. That is why this program needs one pin strapped to an input.
+
+    in0 = the decoded-bit loopback, in1 = D+. Both inputs are spent, so D- is
+    not visible and SE0 cannot be told from a differential 0; the packet is
+    delimited by bit count instead, and a truncated packet fails CRC5 at the
+    host.
+
+    Line states, matching `stt_usb`'s init_pins=[0, 1]: J is D+ low, K is D+
+    high. NRZI: no transition is a 1, a transition is a 0.
+
+    Bits are pipelined by one: the bit sampled at mid-bit N is driven on the
+    loopback pin during N and shifted in at mid-bit N+1, which gives the
+    synchronizer a whole bit period to settle.
+
+    Destuffing is the `c2` countdown the transmitter already uses, not the
+    section 9 bit_stuffer -- that unit only acts on the pin-op path and cannot
+    destuff (docs/usb-rx-analysis.md). USB's rule is a run of ONES, so a
+    counter is enough; CAN needs polarity too, which is what costs it 36 rows.
+    """
+    R = Row
+    rows = []
+    # One copy of the bit machinery per line state, because the previous line
+    # state is what NRZI decodes against and the row pointer is the only place
+    # to keep it. `same` is the test that means "no transition", which NRZI
+    # reads as a 1; its opposite means a transition, a 0.
+    for here, other in (("K", "J"), ("J", "K")):
+        same = "in1h" if here == "K" else "in1l"
+        diff = "in1l" if here == "K" else "in1h"
+        rows += [
+            R(f"R{here}", "tmr", f"Q{here}", f"R{here}"),
+            # A stuffed bit is one the transmitter inserted after six ones. It
+            # is always a 0, so in a stuff cell a NON-transition means seven
+            # ones in a row, which cannot occur in stuffed data -- that is the
+            # line gone idle, and the only end-of-packet this receiver can see.
+            # D- is not readable here (both inputs are spent, one on the
+            # decoded-bit loopback), so SE0 proper is invisible.
+            R(f"Q{here}", "c2z", f"G{here}", f"A{here}"),
+            R(f"G{here}", diff, f"R{other}", "IDLE", act=["c2load"]),
+            R(f"A{here}", same, f"{here}1", f"{here}0"),
+            R(f"{here}1", "always", f"V{here}", pins={0: "hi"}, act=["c2dec"]),
+            R(f"{here}0", "always", f"V{other}", pins={0: "lo"}, act=["c2load"]),
+            # Two rows of slack, then the shift. The decoded bit was just
+            # driven on slot 0 and has to travel back through the SPEC 8.3
+            # two-cycle synchronizer before `fill` can pick it up.
+            R(f"V{here}", "always", f"W{here}"),
+            R(f"W{here}", "always", f"X{here}"),
+            R(f"X{here}", "always", f"C{here}",
+              act=["shift", "crcstep", "cdec"]),
+            R(f"C{here}", "cz", f"P{here}", f"R{here}"),
+            R(f"P{here}", "always", f"R{here}", act=["push", "cload"]),
+        ]
+    # Idle is J. The first transition is SYNC bit 0 -- seeing it at all is what
+    # decodes it -- so drive it and centre the timer. `thalf` centres on the
+    # cell that has just started, which is that same bit, so SKIP spends that
+    # tick shifting it in rather than sampling the cell twice.
+    rows.insert(0, R("SKIP", "tmr", "XK", "SKIP"))
+    rows.insert(0, R("IDLE", "in1h", "SKIP", "IDLE", pins={0: "lo"},
+                     act=["thalf", "cload", "c2load"]))
+    prog = SttProgram(rows)
+    core = SttCore(prog, slots=[("dec", "pp")], ins=["dec", "dp"], period=P,
+                   shift="right", fill="in0", cload=(8, 3, 5), c2load=6,
+                   init_pins=[0])
+    return core, prog
+
+
 def stt_usb_1pin(P):
+
     core, prog = stt_usb(P)
     rows = []
     for r in prog.rows:

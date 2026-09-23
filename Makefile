@@ -193,6 +193,7 @@ check: spec-check
 	@$(MAKE) --no-print-directory check-phase
 	@$(MAKE) --no-print-directory check-config
 	@$(MAKE) --no-print-directory check-fpga-rom
+	@$(MAKE) --no-print-directory check-usb-rx
 	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
 	@for r in $(COMB_RUNS); do \
 	   test -f $(BUILD)/$$r.log && python3 scripts/check_area.py $(BUILD)/$$r.log --comb-ok || true; \
@@ -219,6 +220,16 @@ check-config:
 .PHONY: check-fpga-rom
 check-fpga-rom:
 	@python3 scripts/check_fpga_rom.py
+
+# USB LS receive, machine to machine against the reference transmitter. The
+# stimulus IS stt_usb_1pin, so a decoder that agrees with it agrees with the
+# thing that already passes its own benchmark rather than with a waveform
+# someone typed. Also sweeps the bit period, because the decoded bit goes out
+# on a pin and back through the two-cycle synchronizer before `shift` can take
+# it, which puts a floor under the cell length.
+.PHONY: check-usb-rx
+check-usb-rx:
+	@cd isa_bench && python3 usb_rx_check.py --sweep && python3 usb_rx_check.py 16
 
 # Mutation score is a validity gate, not a report: if it falls, the benchmarks
 # got weaker. That is how the SPI/I2C timing gap survived unnoticed.
