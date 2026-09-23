@@ -21,6 +21,10 @@ low-speed token TX, JTAG TAP, CAN, and a UART protocol detector.
 - **[`docs/writeup.md`](docs/writeup.md)** — the argument: what the
   architecture makes possible, why the shared units exist, and what the
   verification found.
+- **[`docs/validation.md`](docs/validation.md)** — the evidence table: every
+  validated claim with the method that established it (hardware, simulation,
+  formal, gate-level or signoff) and the artifact that reproduces it, plus what
+  is **not** validated. Read this before citing any result.
 - **[`docs/formal.md`](docs/formal.md)** — five properties of the decode and
   control logic proved over the whole input space, each with the deliberate
   break that must make it fail, and the three specification gaps the exercise
