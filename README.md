@@ -34,6 +34,8 @@ low-speed token TX, JTAG TAP, CAN, and a UART protocol detector.
 - **[`docs/area-study.md`](docs/area-study.md)** — the area and integration
   measurements, including §8's record of conclusions that turned out to be
   wrong.
+- **[`docs/fpga-bringup.md`](docs/fpga-bringup.md)** — the bench wiring for the
+  FPGA bring-up stages, and what a passing bring-up run does not show.
 ## The instruction set in one paragraph
  
 A row says one thing: *when this test passes, do these actions, then go
