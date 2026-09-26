@@ -176,7 +176,7 @@ arbitration means a machine waits, and §8.1 leaves nowhere for that wait to go.
 That rule was written only after the same conclusion was reached twice
 independently and by surprise: once for the host FIFOs, once for the §9 units.
 
-### 4.2 The verification is adversarial, in five layers
+### 4.2 The verification is adversarial, in six layers
 
 - **Cycle-exact lockstep.** The Python models drive the world; the RTL shadows
   them and is compared every cycle on row, link, `sr`, `cnt`, `c2`, `crc`,
@@ -201,6 +201,27 @@ independently and by surprise: once for the host FIFOs, once for the §9 units.
   left undefined** -- two configuration fields with no stated legal range, and
   a span of target values naming no row -- all of them places no encoder emits
   and no test reaches.
+
+- **On real hardware.** A Cora Z7-07S runs the design from a bitstream with an
+  on-chip loader and no host: LED blink, UART TX into a USB-TTL adapter at 9600
+  baud, UART TX into UART RX across two machines, and USB low-speed token
+  transmit into receive across two machines — the last two both internally
+  routed and again through a jumper across real pads. A logic analyzer on the
+  USB pair shows **D+ and D− genuinely complementary, ending the packet in
+  SE0**, which is the one property the on-board byte counter structurally could
+  not check: the receiver reads only D+, so a pair-slot fault driving one half
+  would have passed every other test.
+
+  The bit period measures **667 ns at 12 MS/s**, which is one sample period of
+  granularity on a 640 ns bit — the configured rate is 1.5625 Mbit/s, +4.17%
+  against low speed's 1.5 Mbit/s, and at 15.625 MHz no integer timer period
+  reaches 1.5 Mbit/s exactly. So the capture establishes sub-microsecond bits at
+  roughly USB low-speed rate; it does not establish the standard's rate, and
+  nothing here has been talked to a real USB device. `docs/validation.md`
+  carries every hardware claim with the artifact behind it, and the ASIC itself
+  is not fabricated — every hardware result in this project is FPGA.
+
+  ![USB D+/D− captured on a logic analyzer](img/usb-pair-la.png)
 
 Every gate is checked in both directions where that is possible. The
 pin-assignment builder is verified to reject six classes of unusable assignment
