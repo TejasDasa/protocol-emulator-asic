@@ -95,12 +95,15 @@ here depends on it.
 ## 3. Margin against the requirement
 
 **SPI, against a real target device.** W25Q128JV serial flash, datasheet
-Rev. C (2 March 2018), AC characteristics: Data In Setup Time
+Rev. C (27 March 2018), AC characteristics: Data In Setup Time
 t<sub>DVCH</sub>/t<sub>DSU</sub> = **1 ns**, Data In Hold Time
 t<sub>CHDX</sub>/t<sub>DH</sub> = **2 ns**.
 
-The datasheet consulted is the **W25Q128JV-DTR** document (cover: *Publication
-Release Date: March 02, 2018 - Revision C*), not the plain W25Q128JV one. The
+The datasheet consulted is the **W25Q128JV-DTR** document, not the plain
+W25Q128JV one. Its date needs care: the cover reads *March 02, 2018 -
+Revision C*, while all 49 body-page footers and the revision history read
+*March 27, 2018* (history row: `C  03/27/2018`). The revision history is the
+authority and the cover is the outlier, so this report cites 27 March 2018. The
 two parts share the pinout and the 9Fh JEDEC response, but a DTR part is
 specified for double-transfer-rate reads, and its AC table is the one these
 setup and hold numbers come from. The margin here is ~332 ns against 1 ns, so
