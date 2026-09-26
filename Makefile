@@ -193,6 +193,7 @@ check: spec-check
 	@$(MAKE) --no-print-directory check-phase
 	@$(MAKE) --no-print-directory check-config
 	@$(MAKE) --no-print-directory check-fpga-rom
+	@$(MAKE) --no-print-directory check-rom-fresh
 	@$(MAKE) --no-print-directory check-usb-rx
 	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
 	@for r in $(COMB_RUNS); do \
@@ -220,6 +221,10 @@ check-config:
 .PHONY: check-fpga-rom
 check-fpga-rom:
 	@python3 scripts/check_fpga_rom.py
+
+.PHONY: check-rom-fresh
+check-rom-fresh:
+	@python3 scripts/check_rom_fresh.py
 
 # USB LS receive, machine to machine against the reference transmitter. The
 # stimulus IS stt_usb_1pin, so a decoder that agrees with it agrees with the
