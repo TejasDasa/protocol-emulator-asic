@@ -108,6 +108,7 @@ fails if a break passes. 32 tasks, listed in `rtl2/formal/tasks.txt`.
 | `uart_rx` decodes at all 16 phases and tolerates ±8 cycles of jitter in a 32-cycle bit | `make check-phase` | continuous |
 | USB LS receive decodes the reference transmitter, four packets including the all-ones field that forces stuffing; works at bit periods 9–32 | `make check-usb-rx` (`isa_bench/usb_rx_check.py`) | 2026-09-22 |
 | Cycle-exact RTL-vs-model lockstep on every architectural register and FIFO operation; random programs; RTL mutation; the chip boundary at five machines | `make rtl2-full` — **not part of `make check`**; needs cocotb and a simulator | continuous |
+| The FPGA SPI bring-up path carries a JEDEC ID end to end: machine 0 asserts CS, clocks out `9F`, clocks in three bytes and releases CS; `stt_hostread` relays each byte to machine 1, which prints all four over UART in order | `rtl2/tb/tb_fpga_spi.v` against `rtl2/tb/spi_flash_model.v`. **The flash model is ours**, so this validates the plumbing -- pin plan, CS idle-high, MISO released, bit order, the relay -- and says nothing about a real W25Q128JV. The UART check asserts the byte *sequence*; a break that forwards only the first byte of each transaction makes it fail | 2026-09-25 |
 | Program sizes against the 32-row ceiling: uart_tx 5, uart_rx 8, spi 8, i²c 22, usb_tx 16, **usb_rx 24**, jtag 25, can 24 | built and counted from `isa_bench/programs.py`, `jtag_prog.py`, `can_prog.py` | 2026-09-22 |
 
 ---
@@ -118,7 +119,7 @@ Each entry says what is missing, not why it is acceptable.
 
 | claim | what exists | what is missing |
 |---|---|---|
-| **SPI against a real device** | `bench.run_spi` against `devices.SpiTarget`, a model written here | Never run against a real SPI peripheral, and never on hardware in any form |
+| **SPI against a real device** | `bench.run_spi` against `devices.SpiTarget`, and an FPGA path (`rtl2/tb/tb_fpga_spi.v`) that reads a JEDEC ID and prints it -- both against models written here | Never clocked against a real W25Q128JV, or any real SPI peripheral. The expected `EF 70 18` comes from the datasheet and is programmed into our own model, so the simulation cannot disconfirm it. No hardware run |
 | **I²C against a real device** | `bench.run_i2c` against `devices.I2cTarget`, including clock stretching | Same — model only, no hardware |
 | **CAN against a real device** | `make check-can`: TX decoded by an independent CRC-15, RX rejects corrupted frames | Model only. CAN has never run on hardware, which also means its destuffing — the case §16.0 says is expensive — has no physical evidence |
 | **`crc_lfsr16` and `bit_stuffer`** | Implemented, reachable through §9's reserved codes, exercised in simulation | **Never run on any hardware, in any form.** The USB work did not change this: the token uses the 5-bit per-machine CRC, and the receiver destuffs with the `c2` countdown, not the unit |

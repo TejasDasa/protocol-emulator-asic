@@ -139,6 +139,16 @@ UB_DM_PIN    = 1    # uo_out[1], JA2 -- D-, observable but not looped
 UB_DOUT_PIN  = 2    # uo_out[2], JA3 -- host port data out
 UB_ARRIVE    = 8    # uio[0],    JB1 -- where D+ comes back
 UB_DEC_PIN   = 9    # uio[1],    JB2 -- the decoded-bit loopback
+
+# SPI flash. CS, SCK and MOSI are outputs; MISO has to arrive on a uio pin,
+# because a machine cannot read back a uo_out pin -- the iomux input map is
+# {uio_in, ui_in}, so index p < 8 reads ui_in[p], a different physical pin.
+SF_MOSI_PIN  = 0    # uo_out[0], JA1 -> flash DI
+SF_SCK_PIN   = 1    # uo_out[1], JA2 -> flash CLK
+SF_CS_PIN    = 2    # uo_out[2], JA3 -> flash /CS, idles HIGH
+SF_UART_PIN  = 3    # uo_out[3], JA4 -> USB-TTL RX, where the answer is printed
+SF_DOUT_PIN  = 4    # uo_out[4], JA5 -- host port data out
+SF_MISO_PIN  = 8    # uio[0],    JB1 <- flash DO, RELEASED by an open-drain slot
 #
 # UB_DEC_PIN needs no wire. A uio pin is bidirectional and its input path sees
 # what the chip drives, so a machine can read its own output back through the
@@ -156,7 +166,8 @@ def pad_rows(prog):
 
 
 def build(nsm, f_sys_hz, which, seconds, period, baud, byte,
-          usb_period=10, usb_token=(0x2D, 0x3A)):
+          usb_period=10, usb_token=(0x2D, 0x3A),
+          sck_div=64, jedec_mid=0x70):
     """Returns everything the ROM and the report need.
 
     `cores` and `progs` are per machine, index 0 first. A machine with no
@@ -214,7 +225,69 @@ def build(nsm, f_sys_hz, which, seconds, period, baud, byte,
                     plan.read(m, i, 0)
             return None
 
+    elif which == "spi_flash":
+        if nsm < 2:
+            raise SystemExit("spi_flash needs --nsm 2: SPI on machine 0, "
+                             "UART TX on machine 1")
+        period, uart_got, uart_err = baud_period(f_sys_hz, baud)
+        spi_ref_core, spi_prog = P_REF.STT_1PIN["spi"](sck_div)
+        uart_core_ref, uart_prog = P_REF.STT_1PIN["uart_tx"](period)
+
+        # The SPI reference unchanged. It is already full duplex: ins=["miso"]
+        # with fill="in0", so `shift` clocks MOSI out and MISO in together, and
+        # `push` delivers each received byte. init_pins leaves CS HIGH, which
+        # matters -- the flash ignores everything while CS is high, so a CS
+        # that came up low would start the first transaction mid-frame.
+        spi_core = SttCore(
+            spi_prog, slots=[("mosi", "pp"), ("sck", "pp"), ("cs", "pp")],
+            ins=["miso"], period=spi_ref_core.P,
+            shift=spi_ref_core.shift, fill=spi_ref_core.fill,
+            cload=spi_ref_core.cvals, sr_width=8,
+            init_pins=[0, 0, 1],
+        )
+        # UART TX unchanged too, and here its host-fed `load` is exactly right:
+        # the bytes it prints are the ones the SPI machine received. Slot 1 is
+        # open drain holding 1, releasing the pin MISO arrives on.
+        uart_core = SttCore(
+            uart_prog, slots=[("tx", "pp"), ("release", "od")],
+            ins=("in0", "in1"), period=period,
+            shift=uart_core_ref.shift, fill=uart_core_ref.fill,
+            cload=uart_core_ref.cvals, sr_width=8, loadk=0,
+            init_pins=[1, 1],
+        )
+        cores, progs = [spi_core, uart_core], [spi_prog, uart_prog]
+        # JEDEC ID: command 9Fh then three bytes clocked in. The SPI program
+        # keeps CS low while its TX FIFO has bytes, so four bytes is one
+        # transaction; the first byte read back is whatever DO held while the
+        # command was going out.
+        wseq = [0x9F, 0x00, 0x00, 0x00]
+        rseq = [0xFF, 0xEF, jedec_mid, 0x18]
+        info.update(period=period, sck_div=sck_div,
+                    sck_hz=f_sys_hz / sck_div, baud_got=uart_got,
+                    baud_err=uart_err, baud_want=baud,
+                    wseq=wseq, rseq=rseq, jedec_mid=jedec_mid,
+                    host=dict(wr_en=1, wsel=0, rsel=0,
+                              dout_pin=SF_DOUT_PIN, stb_pin=LB_STB_PIN,
+                              din_pin=LB_DIN_PIN, relay_en=1, relay_sel=1))
+
+        def plan_of(plan):
+            plan.drive(0, 0, SF_MOSI_PIN)
+            plan.drive(0, 1, SF_SCK_PIN)
+            plan.drive(0, 2, SF_CS_PIN)
+            plan.drive(1, 0, SF_UART_PIN)
+            plan.drive(1, 1, SF_MISO_PIN, od=True)     # release it for the flash
+            plan.read(0, 0, SF_MISO_PIN)               # machine 0 in0 = MISO
+            plan.read(0, 1, SF_MISO_PIN)
+            plan.read(1, 0, SF_MISO_PIN)
+            plan.read(1, 1, SF_MISO_PIN)
+            plan.host_port(SF_DOUT_PIN, LB_STB_PIN, LB_DIN_PIN)
+            for pin in range(5, 16):
+                if pin != SF_MISO_PIN:
+                    plan.drive(0, 2, pin)              # quiet: follows CS
+            return None
+
     elif which == "usb_loopback":
+
         if nsm < 2:
             raise SystemExit("usb_loopback needs --nsm 2")
         period = usb_period
@@ -361,12 +434,22 @@ def main():
     ap.add_argument("--div", type=int, default=8, help="stt_fpga_top DIV")
     ap.add_argument("--nsm", type=int, default=1)
     ap.add_argument("--program",
-                    choices=("blink", "uart_tx", "loopback", "usb_loopback"),
+                    choices=("blink", "uart_tx", "loopback", "usb_loopback",
+                             "spi_flash"),
                     default="blink",
                     help="blink is the known-good fallback: if it stops "
                          "working, something regressed rather than the new "
                          "program being wrong")
     ap.add_argument("--baud", type=int, default=9600)
+    ap.add_argument("--sck-div", type=int, default=64,
+                    help="clocks per SCK period for spi_flash. 64 at "
+                         "15.625 MHz is 244 kHz -- slow on purpose, so an "
+                         "analyzer trace is unambiguous and timing is off the "
+                         "suspect list on the first attempt.")
+    ap.add_argument("--jedec-mid", type=lambda x: int(x, 0), default=0x70,
+                    help="expected middle JEDEC byte: 0x70 for the "
+                         "W25Q128JV-DTR datasheet in hand, 0x40 for the "
+                         "IQ/JQ variant. Only affects what the LED counts.")
     ap.add_argument("--usb-period", type=int, default=10,
                     help="clocks per USB bit cell. The receiver needs at "
                          "least 9: it drives each decoded bit on a pin and "
@@ -395,7 +478,8 @@ def main():
     byte = a.byte if a.byte is not None else (0x47 if a.program == "loopback"
                                               else 0x55)
     d = build(a.nsm, f_sys, a.program, a.seconds, a.period, a.baud, byte,
-              usb_period=a.usb_period)
+              usb_period=a.usb_period, sck_div=a.sck_div,
+              jedec_mid=a.jedec_mid)
     i = d["info"]
 
     if a.program == "blink":
@@ -404,6 +488,18 @@ def main():
                 f"//   counter 1 reload   {d['cload']} timer ticks\n"
                 f"//   LED toggles every  {i['toggle_s']:.3f} s"
                 f"  -> {1 / (2 * i['toggle_s']):.3f} Hz blink")
+    elif a.program == "spi_flash":
+        what = (f"//   SCK                {i['sck_hz'] / 1e3:.1f} kHz "
+                f"(divisor {i['sck_div']}), SPI mode 0\n"
+                f"//   UART               {i['baud_got']:.2f} baud "
+                f"({i['baud_err'] * 100:+.4f}%)\n"
+                f"//   machine 0          spi, MOSI pin {SF_MOSI_PIN} (JA1), "
+                f"SCK pin {SF_SCK_PIN} (JA2), CS pin {SF_CS_PIN} (JA3)\n"
+                f"//   machine 1          uart_tx, pin {SF_UART_PIN} (JA4)\n"
+                f"//   MISO               pin {SF_MISO_PIN} (JB1), released\n"
+                f"//   sends              "
+                f"{[hex(x) for x in i['wseq']]} (JEDEC ID, 9Fh + 3)\n"
+                f"//   expects            {[hex(x) for x in i['rseq']]}")
     elif a.program == "usb_loopback":
         what = (f"//   bit cell P         {d['period']} cycles = "
                 f"{i['bitrate'] / 1e6:.4f} Mbit/s\n"
@@ -469,10 +565,31 @@ def main():
         byte_rate = f_sys / d["period"] / 11     # one byte per 11 bit times
     else:
         byte_rate = 0
-    # Idle clocks to leave after each packet. The USB receiver needs a run of
-    # ones longer than stuffing allows to see end of packet, which takes more
-    # than seven bit times; 16 is margin.
-    wgap = 16 * d['period'] if a.program == 'usb_loopback' else 0
+    # Idle between write sequences, counted in FRAMES, not in clocks. A frame
+    # is the 16-clock host transaction of SPEC 11.2 plus stt_hostread's
+    # inter-frame turnaround, ~24 clocks in total, so a gap of N frames is
+    # roughly 24*N system clocks. The two expressions below look like they are
+    # in different units because they are written from different ends: the USB
+    # one was chosen as a bit-time multiple and happens to be generous once
+    # converted, the SPI one is derived in clocks and divided by 24 to land in
+    # frames. Neither is a clock count. (The USB value is load-bearing -- it is
+    # the pacing that fixed the idle-gap bug on hardware -- so it is left at the
+    # value that was validated rather than retuned to the units it is in.)
+    #   usb_loopback: enough for the line to go idle so the receiver can see
+    #                 end of packet.
+    #   spi_flash:    enough for the UART to finish printing the four bytes of
+    #                 the previous transaction before the next one starts,
+    #                 since SPI produces bytes far faster than 9600 baud
+    #                 drains them and the relay would otherwise stall on a
+    #                 permanently full TX FIFO.
+    if a.program == 'usb_loopback':
+        # 160 frames ~= 3840 clocks ~= 384 bit times at period 10. Far more than
+        # the >7 bit times end-of-packet needs; the margin is what hardware ran.
+        wgap = 16 * d['period']
+    elif a.program == 'spi_flash':
+        wgap = min(65535, int(4 * 11 * i['period'] / 24) + 200)
+    else:
+        wgap = 0
     led_bit = 8
     if byte_rate > 0:
         import math
@@ -485,6 +602,10 @@ def main():
         # re-typing it. A hand-copied timing constant that disagrees with the
         # ROM is the same class of bug as a hand-copied bit stream.
         f"localparam integer STT_ROM_PERIOD = {d['period']};",
+        # The UART bit period, when a program has a UART on a second machine
+        # and STT_ROM_PERIOD is something else. spi_flash's PERIOD is the SPI
+        # timer period; its UART runs at this one.
+        f"localparam integer STT_ROM_UART_P = {i.get('period', 0) if a.program == 'spi_flash' else 0};",
         f"localparam integer STT_ROM_IS_UART = {1 if a.program in ('uart_tx', 'loopback') else 0};",
         f"localparam integer STT_ROM_IS_LOOPBACK = {1 if a.program in ('loopback', 'usb_loopback') else 0};",
         f"localparam integer STT_ROM_IS_USB = {1 if a.program == 'usb_loopback' else 0};",
@@ -500,6 +621,8 @@ def main():
         vh(seq_word(rseq), "STT_ROM_HOST_RSEQ", 8 * len(rseq)),
         f"localparam integer STT_ROM_HOST_DOUT = {host['dout_pin']};",
         f"localparam [15:0]  STT_ROM_HOST_WGAP = 16'd{wgap};",
+        f"localparam integer STT_ROM_HOST_RELAY = {host.get('relay_en', 0)};",
+        f"localparam [2:0]   STT_ROM_HOST_RSLOT = 3'd{host.get('relay_sel', 1)};",
         f"localparam integer STT_ROM_LED_BIT   = {led_bit};",
         f"localparam [7:0]   STT_ROM_BYTE   = 8'h{i.get('byte', 0):02X};",
         f"localparam integer STT_ROM_IMEM_N = {d['imem_n']};",
@@ -528,6 +651,15 @@ def main():
     if a.program == "blink":
         print(f"  P              {d['period']} = {d['period'] / f_sys * 1e3:.3f} ms")
         print(f"  cload          {d['cload']} ticks -> toggle every {real:.3f} s")
+    elif a.program == "spi_flash":
+        print(f"  SCK            {i['sck_hz'] / 1e3:.1f} kHz "
+              f"(divisor {i['sck_div']}), mode 0")
+        print(f"  UART           {i['baud_got']:.2f} baud "
+              f"({i['baud_err'] * 100:+.4f}%) on pin {SF_UART_PIN}")
+        print(f"  sends          {[hex(x) for x in i['wseq']]}")
+        print(f"  expects        {[hex(x) for x in i['rseq']]}")
+        print(f"  MOSI pin {SF_MOSI_PIN} (JA1), SCK pin {SF_SCK_PIN} (JA2), "
+              f"CS pin {SF_CS_PIN} (JA3), MISO pin {SF_MISO_PIN} (JB1)")
     elif a.program == "usb_loopback":
         print(f"  P              {d['period']} cycles per bit "
               f"({i['bitrate'] / 1e6:.4f} Mbit/s)")

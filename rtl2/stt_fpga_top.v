@@ -106,7 +106,14 @@ module stt_fpga_top #(
     // machine 1's in0. A machine cannot read back a uo_out pin -- the iomux
     // input map is {uio_in, ui_in}, so pin index p < 8 reads ui_in[p], a
     // different physical pin -- which is why the loop has to arrive on uio.
-    wire lb_bit = (LOOPBACK_INTERNAL != 0) ? uo_out[0] : uio[0];
+    // Gated on the ROM, not just the parameter. The internal route belongs to
+    // the LOOPBACK programs, where uio[0] is where a machine's own transmit
+    // comes back. Under a ROM that reads a real external device on uio[0] --
+    // spi_flash reads MISO there -- an ungated internal route quietly feeds
+    // uo_out[0] back instead, and MISO reads MOSI: the JEDEC ID comes back as
+    // the command byte that was just sent.
+    wire lb_bit = (LOOPBACK_INTERNAL != 0 && STT_ROM_IS_LOOPBACK != 0)
+                ? uo_out[0] : uio[0];
     wire [7:0] uio_pins = {uio[7:1], lb_bit};
 
     assign uio_in = ldr_done ? uio_pins : {ldr_sm_sel, uio_pins[4:0]};
@@ -148,7 +155,8 @@ module stt_fpga_top #(
 
     wire       hr_stb, hr_din;
     wire [7:0] hr_byte;
-    localparam integer HOST_WREN_I = STT_ROM_HOST_WREN;
+    localparam integer HOST_WREN_I  = STT_ROM_HOST_WREN;
+    localparam integer HOST_RELAY_I = STT_ROM_HOST_RELAY;
     wire       hr_valid;
     wire [3:0] hr_status;
     wire [31:0] hr_good, hr_bad;
@@ -170,6 +178,8 @@ module stt_fpga_top #(
         .rd_sel      (STT_ROM_HOST_RSEL),
         .rd_seq      (STT_ROM_HOST_RSEQ),
         .wr_gap      (STT_ROM_HOST_WGAP[15:0]),
+        .relay_en    (HOST_RELAY_I[0]),
+        .relay_sel   (STT_ROM_HOST_RSLOT),
         .dout        (uo_out[STT_ROM_HOST_DOUT]),
         .stb         (hr_stb),
         .din         (hr_din),

@@ -95,9 +95,18 @@ here depends on it.
 ## 3. Margin against the requirement
 
 **SPI, against a real target device.** W25Q128JV serial flash, datasheet
-Rev. C (27 March 2018), AC characteristics: Data In Setup Time
+Rev. C (2 March 2018), AC characteristics: Data In Setup Time
 t<sub>DVCH</sub>/t<sub>DSU</sub> = **1 ns**, Data In Hold Time
 t<sub>CHDX</sub>/t<sub>DH</sub> = **2 ns**.
+
+The datasheet consulted is the **W25Q128JV-DTR** document (cover: *Publication
+Release Date: March 02, 2018 - Revision C*), not the plain W25Q128JV one. The
+two parts share the pinout and the 9Fh JEDEC response, but a DTR part is
+specified for double-transfer-rate reads, and its AC table is the one these
+setup and hold numbers come from. The margin here is ~332 ns against 1 ns, so
+no plausible difference between the two AC tables changes the conclusion --
+but the number's provenance is the DTR sheet, and a reader checking it against
+the non-DTR sheet should know that before concluding the figures disagree.
 
 The SPI program (`isa_bench/programs.py`, P = 16) drives MOSI on row `FALL2`,
 one cycle after the `FALL` tick, and raises SCK on the *next* tick — a
