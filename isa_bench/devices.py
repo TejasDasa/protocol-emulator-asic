@@ -370,3 +370,154 @@ class UsbLsMonitor:
             self.packets.append(f"bad CRC {crc:#x} expected {crc5_usb(bits[16:27]):#x}")
             return
         self.packets.append((pid, field))
+
+
+class I2cController:
+    """Bus master that drives a transaction and TIMES the target's ACK.
+
+    The point of this model is the deadline, not the data. A target that ACKs
+    one cycle before the ninth rising edge carries the same byte as one that
+    ACKs immediately, and a lenient model would call both correct. So this
+    records, for every ACK slot, the cycle the eighth clock fell, the cycle SDA
+    actually went low, and the cycle the ninth clock rose, and reports all
+    three. `setup_min` is the margin demanded before the rising edge: an ACK
+    that arrives inside the window but with no setup time is a failure here.
+
+    The waveform is built up front as a schedule, but every measurement is read
+    off the net during the run, so what is checked is the bus and not the plan.
+
+    Open drain throughout: value 1 releases the line to the pull-up, 0 drives.
+    """
+
+    def __init__(self, sda, scl, period, txns, setup_min=1, name="i2c_ctl"):
+        if period < 4 or period % 2:
+            raise ValueError("period must be even and >= 4")
+        self.sda_n, self.scl_n, self.period, self.h = sda, scl, period, period // 2
+        self.txns, self.setup_min, self.name = txns, setup_min, name
+        self.ev = []                 # (t, kind, value)
+        self.cur = 0
+        self._build()
+        self.ev.sort(key=lambda e: e[0])
+        self.i = 0
+        self.prev_sda = 1
+        self.pending = None          # ACK slot being timed
+        self.acks = []               # one dict per ACK slot
+        self.read_bytes = []         # bytes clocked in during read transactions
+        self._rx = 0
+        self._rxn = 0
+        self.finished_at = None
+
+    # ---------------------------------------------------------------- schedule
+    def _at(self, t, kind, val):
+        self.ev.append((t, kind, val))
+
+    def _start(self):
+        t, h = self.cur, self.h
+        self._at(t, "scl", 1)
+        self._at(t, "sda", 1)
+        self._at(t + h, "sda", 0)            # SDA falls while SCL high
+        self.cur = t + 2 * h
+
+    def _stop(self):
+        t, h = self.cur, self.h
+        self._at(t, "scl", 0)
+        self._at(t + 1, "sda", 0)
+        self._at(t + h, "scl", 1)
+        self._at(t + 2 * h, "sda", 1)        # SDA rises while SCL high
+        self.cur = t + 3 * h
+
+    def _bit(self, v, tag=None, sample=False):
+        """One SCL cycle: low for h, high for h. SDA is set just after the fall."""
+        t, h = self.cur, self.h
+        self._at(t, "scl", 0)
+        if tag:
+            self._at(t, "ack_fall", tag)     # the deadline starts here
+        self._at(t + 1, "sda", v)
+        self._at(t + h, "scl", 1)
+        if tag:
+            self._at(t + h, "ack_rise", tag)
+        if sample:
+            self._at(t + h, "sample", None)
+        self.cur = t + 2 * h
+
+    def _byte_out(self, b):
+        for i in range(7, -1, -1):
+            self._bit((b >> i) & 1)
+
+    def _build(self):
+        for n, tx in enumerate(self.txns):
+            self._start()
+            rw = tx.get("rw", 0)
+            self._byte_out((tx["addr"] << 1) | rw)
+            self._bit(1, tag=f"txn{n}:addr")          # ACK slot: master releases
+            if rw == 0:
+                self._byte_out(tx["data"])
+                self._bit(1, tag=f"txn{n}:data")
+            else:
+                for _ in range(8):
+                    self._bit(1, sample=True)          # target drives, we sample
+                self._bit(1)                           # our NACK ends the read
+            self._stop()
+            self.cur += self.period                    # idle between transactions
+
+    # -------------------------------------------------------------------- step
+    def step(self, w):
+        sda = w.value(self.sda_n)
+        # Only count SDA low once WE have let go of it. The eighth data bit may
+        # still be driven low by us when the ACK slot opens, and timing that as
+        # the target's response would report a latency the target never had.
+        if (self.pending is not None and self.pending["t_low"] is None
+                and sda == 0 and self.name not in w.nets[self.sda_n].drivers):
+            self.pending["t_low"] = w.t
+
+        while self.i < len(self.ev) and self.ev[self.i][0] <= w.t:
+            _, kind, val = self.ev[self.i]
+            self.i += 1
+            if kind in ("sda", "scl"):
+                net = self.sda_n if kind == "sda" else self.scl_n
+                w.nets[net].drive(self.name, None if val else 0)
+            elif kind == "ack_fall":
+                self.pending = {"tag": val, "t_fall": w.t, "t_low": None,
+                                "t_rise": None, "acked": None}
+            elif kind == "ack_rise":
+                p = self.pending
+                p["t_rise"] = w.t
+                p["acked"] = (sda == 0)
+                # Two references, and they differ by one cycle. `seen` is when a
+                # device sampling at the top of its step notices, which is what
+                # this master does and is the conservative number. `latency` is
+                # when the NET went low, read back out of the recorded history,
+                # which is the same reference isa_bench/latency_check.py uses
+                # and is the architecture's actual response time. Devices step
+                # before the core each cycle, so an observer is always one
+                # cycle behind the bus. Reporting only the observer's number
+                # would overstate the latency by one.
+                p["seen"] = p["t_low"]
+                h = w.history[self.sda_n]
+                bus = None
+                for t in range(p["t_fall"] + 1, min(p["t_rise"] + 1, len(h))):
+                    if h[t] == 0:
+                        bus = t
+                        break
+                p["t_low"] = bus
+                slack = p["t_rise"] - bus if bus is not None else None
+                p["latency"] = (bus - p["t_fall"]) if bus is not None else None
+                p["setup"] = slack
+                if p["acked"] and slack is not None and slack < self.setup_min:
+                    w.error(f"i2c: ACK for {p['tag']} reached SDA only {slack} "
+                            f"cycle(s) before the ninth rising edge "
+                            f"(minimum {self.setup_min})")
+                self.acks.append(p)
+                self.pending = None
+            elif kind == "sample":
+                self._rx = ((self._rx << 1) | sda) & 0xFF
+                self._rxn += 1
+                if self._rxn == 8:
+                    self.read_bytes.append(self._rx)
+                    self._rx, self._rxn = 0, 0
+
+        if self.i >= len(self.ev) and self.finished_at is None:
+            self.finished_at = w.t
+
+    def finished(self, w):
+        return self.finished_at is not None and w.t > self.finished_at + 4

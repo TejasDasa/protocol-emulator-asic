@@ -195,6 +195,8 @@ check: spec-check
 	@$(MAKE) --no-print-directory check-fpga-rom
 	@$(MAKE) --no-print-directory check-rom-fresh
 	@$(MAKE) --no-print-directory check-usb-rx
+	@$(MAKE) --no-print-directory check-latency
+	@$(MAKE) --no-print-directory check-i2c-target
 	@python3 scripts/check_area.py $(filter-out $(addprefix $(BUILD)/,$(addsuffix .log,$(COMB_RUNS))),$(wildcard $(BUILD)/*.log))
 	@for r in $(COMB_RUNS); do \
 	   test -f $(BUILD)/$$r.log && python3 scripts/check_area.py $(BUILD)/$$r.log --comb-ok || true; \
@@ -225,6 +227,14 @@ check-fpga-rom:
 .PHONY: check-rom-fresh
 check-rom-fresh:
 	@python3 scripts/check_rom_fresh.py
+
+.PHONY: check-latency
+check-latency:
+	@python3 isa_bench/latency_check.py
+
+.PHONY: check-i2c-target
+check-i2c-target:
+	@python3 isa_bench/i2c_target_check.py
 
 # USB LS receive, machine to machine against the reference transmitter. The
 # stimulus IS stt_usb_1pin, so a decoder that agrees with it agrees with the

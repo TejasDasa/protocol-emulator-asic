@@ -36,6 +36,9 @@ low-speed token TX, JTAG TAP, CAN, and a UART protocol detector.
   wrong.
 - **[`docs/fpga-bringup.md`](docs/fpga-bringup.md)** — the bench wiring for the
   FPGA bring-up stages, and what a passing bring-up run does not show.
+- **[`docs/i2c-target.md`](docs/i2c-target.md)** — the first program that
+  responds rather than initiates, and the response-latency number that
+  generalises past I²C.
 ## The instruction set in one paragraph
  
 A row says one thing: *when this test passes, do these actions, then go

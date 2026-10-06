@@ -586,3 +586,105 @@ BUILDERS = {
     "RM": {"uart_tx": rm_uart_tx, "uart_rx": rm_uart_rx, "spi": rm_spi,
            "i2c": rm_i2c, "usb": rm_usb},
 }
+
+
+def stt_i2c_target(P, addr=0x42):
+    """7-bit I2C TARGET: the first program here that RESPONDS rather than initiates.
+
+    Everything else in this file either drives a bus (I2C/SPI master, USB token
+    TX, UART TX) or watches one (UART RX, USB RX). A target has to meet a
+    deadline set by somebody else's clock: the ACK must be on SDA before the
+    master's ninth rising edge, and the master decides when that is.
+
+    The structure is dictated by that deadline. A row can test one condition and
+    drive a pin in the same cycle, so the cheapest possible response is a row
+    that is ALREADY WAITING on the edge -- test `in1l`, drive `lo`, done. That
+    costs the two synchronizer cycles of SPEC section 8.3 and nothing else.
+
+    Which means the address comparison cannot happen after the address arrives.
+    It is spread across the seven address bits instead, so that by the eighth
+    falling edge the program is sitting in either WRA/RDA (matched, about to
+    ACK) or back in I0 (did not match, will not drive). The decision is already
+    made; the ACK row only has to act on it. See isa_bench/latency_check.py.
+
+    The comparison itself has no comparator to use. `loadk` puts the expected
+    address in the shift register and `srbit` reads its top bit, so each bit
+    becomes a two-way branch: expect 1 -> test in0h, expect 0 -> test in0l.
+    `shift` then brings the next expected bit up. The same `shift` also pulls
+    SDA into the low bits, which is harmless here because only the top bit is
+    ever read, and is exactly what the data phase wants.
+
+    No `tmr` anywhere: the target is entirely slave-clocked, so it has no bit
+    period to configure and follows the master's clock, stretching included.
+    """
+    R = Row
+    prog = SttProgram([
+        # -- START: SDA falls while SCL is high. Requiring SDA high first means
+        #    data transitions (which happen while SCL is low) cannot trigger it,
+        #    so this doubles as the resynchronisation point after STOP, after a
+        #    NACK, and after any transaction we chose not to answer.
+        R("I0", "in0h", "I1", "I0"),
+        R("I1", "in0l", "I2", "I1"),
+        R("I2", "in1h", "I3", "I0", act=["loadk", "cload", "c2load"]),
+        # START leaves SCL still high. Without this the bit loop would read that
+        # same high phase as the first clock pulse and sample a bit that the
+        # master never sent.
+        R("I3", "in1l", "B0", "I3"),
+
+        # -- Shared bit loop. c2 is the phase flag: 1 = address (compare each
+        #    bit), 0 = data (just shift it in).
+        R("B0", "in1h", "B1", "B0", act=["shift", "cdec"]),
+        R("B1", "c2z", "B2X", "B2"),
+        R("B2", "srbit", "B3", "B4"),
+        R("B3", "in0h", "B2X", "I0"),
+        R("B4", "in0l", "B2X", "I0"),
+        # Decide BEFORE waiting for the fall. If the last bit were counted after
+        # the falling edge, that edge would already be spent and the ACK could
+        # not be driven two cycles after it.
+        R("B2X", "cz", "B7", "B5"),
+        R("B5", "in1l", "B0", "B5"),
+        R("B7", "c2z", "DACK", "RWL"),
+
+        # -- Address done: the eighth bit is R/W.
+        R("RWL", "in1l", "RW0", "RWL"),
+        R("RW0", "in1h", "RW1", "RW0"),
+        R("RW1", "in0h", "RDA", "WRA"),
+
+        # -- WRITE: ACK the address, then take one data byte.
+        R("WRA", "in1l", "WRB", "WRA", pins={0: "lo"}),
+        R("WRB", "in1h", "WRC", "WRB"),
+        R("WRC", "in1l", "B0", "WRC", pins={0: "hi"},
+          act=["clr", "cload_b", "c2dec"]),
+        R("DACK", "in1l", "DKB", "DACK", pins={0: "lo"}, act=["push"]),
+        R("DKB", "in1h", "DKC", "DKB"),
+        R("DKC", "in1l", "I0", "DKC", pins={0: "hi"}),
+
+        # -- READ: ACK the address, then drive one byte out of the host FIFO.
+        R("RDA", "in1l", "RDB", "RDA", pins={0: "lo"}),
+        R("RDB", "in1h", "RDC", "RDB"),
+        R("RDC", "in1l", "RD0", "RDC", act=["load", "cload_c"], pins={0: "sr"}),
+        # Same trick as the ACK: decide during the HIGH phase, so the row that
+        # sees the falling edge can drive on the spot. Counting after the fall
+        # instead cost two extra rows of latency per bit, which set the minimum
+        # SCL period at 10 cycles rather than 6 -- the read path, not the ACK,
+        # was the binding constraint. Testing cz before the shift also keeps the
+        # eighth bit the last thing driven; shifting first puts a ninth,
+        # meaningless bit on SDA.
+        R("RD0", "in1h", "RD1", "RD0"),
+        R("RD1", "cz", "RD3", "RD2"),
+        R("RD2", "in1l", "RD0", "RD2", act=["shift", "cdec"], pins={0: "sr"}),
+        R("RD3", "in1l", "RD4", "RD3", pins={0: "hi"}),
+        R("RD4", "in1h", "RD5", "RD4"),
+        R("RD5", "in1l", "I0", "RD5"),
+    ])
+    core = SttCore(prog, slots=[("sda", "od")], ins=["sda", "scl"],
+                   period=P // 4, shift="left", fill="in0",
+                   loadk=addr, cload=(7, 8, 7), c2load=1, init_pins=[1])
+    return core, prog
+
+
+# Registered after its definition, not in the literal above, because the
+# builder is defined further down this file. The target joins the frozen set:
+# its encoding is now protected by `make check-freeze` like every other
+# reference program.
+STT_1PIN["i2c_target"] = stt_i2c_target
